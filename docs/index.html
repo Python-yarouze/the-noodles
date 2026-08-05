@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>THE NOODLES</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Shippori+Mincho:wght@500;700&family=Zen+Maru+Gothic:wght@400;500;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="css/game.css" />
+    <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+  </head>
+  <body>
+    <p id="global-status" aria-live="polite"></p>
+
+    <main id="lobby">
+      <header class="hero">
+        <h1 class="hero-title">THE NOODLES</h1>
+        <p class="hero-sub">カードでラーメンを組み立て、先に目標点を目指す対戦ゲーム</p>
+      </header>
+
+      <div class="lobby-card">
+        <label for="name-input">表示名</label>
+        <input id="name-input" type="text" maxlength="16" placeholder="あなたの名前" autocomplete="nickname" />
+
+        <details class="lobby-details">
+          <summary>ルールセット <span class="details-summary-val">THE NOODLES</span></summary>
+          <fieldset class="rule-fieldset nested">
+            <label class="radio-row">
+              <input type="radio" name="rule-set" value="noodles" checked />
+              THE NOODLES（フル・★あり）
+            </label>
+            <label class="radio-row">
+              <input type="radio" name="rule-set" value="classic" />
+              本家ルール（★なし / stir fly eighteen）
+            </label>
+          </fieldset>
+        </details>
+
+        <details class="lobby-details">
+          <summary>対戦設定 <span class="details-summary-val">50点・15秒</span></summary>
+          <fieldset class="rule-fieldset settings-fieldset nested">
+            <label for="win-score">目標ポイント（先取）</label>
+            <input id="win-score" type="number" min="20" max="100" step="5" value="50" />
+            <label for="taste-sec">味見の制限時間（秒・0＝制限なし）</label>
+            <input id="taste-sec" type="number" min="0" max="60" step="1" value="15" />
+            <p class="settings-hint">ホスト／同じPC開始時に反映。デフォルトは50点・15秒。0で制限なし。</p>
+          </fieldset>
+        </details>
+
+        <div class="btn-row">
+          <button type="button" class="btn primary" id="btn-host">部屋を作る（ホスト）</button>
+          <div class="join-row">
+            <input id="room-input" type="text" maxlength="8" placeholder="部屋コード" autocomplete="off" aria-label="部屋コード" />
+            <button type="button" class="btn" id="btn-join">部屋に参加</button>
+          </div>
+          <button type="button" class="btn" id="btn-solo">1人でプレイ（vs CPU）</button>
+          <button type="button" class="btn ghost" id="btn-rules">ルールを見る</button>
+        </div>
+
+        <p class="lobby-note">
+          2〜4人まで。ホストのブラウザが進行を管理します。カード選択後にアクション、味見はスキップ可能。
+          対戦中は「お助け」で強い組み合わせと手札の改善案を確認できます。
+        </p>
+
+        <div class="lobby-debug">
+          <label for="local-count" class="lobby-debug-label">同じPC人数</label>
+          <select id="local-count" class="lobby-debug-select">
+            <option value="2">2人</option>
+            <option value="3">3人</option>
+            <option value="4">4人</option>
+          </select>
+          <button type="button" class="btn ghost btn-debug" id="btn-local">同じPC（デバッグ）</button>
+        </div>
+      </div>
+    </main>
+
+    <div id="table" hidden></div>
+
+    <div id="lobby-rules-modal" class="modal-backdrop" hidden>
+      <div class="modal rules-modal" role="dialog" aria-labelledby="lobby-rules-title" onclick="event.stopPropagation()">
+        <header class="ref-header">
+          <h2 id="lobby-rules-title">ゲームルール</h2>
+          <button type="button" class="modal-close" id="btn-close-lobby-rules" aria-label="閉じる">×</button>
+        </header>
+        <div class="rules-sheet">
+          <img src="assets/cards/rules.png" alt="THE NOODLES ルール" />
+        </div>
+      </div>
+    </div>
+
+    <script type="module" src="js/app.js"></script>
+  </body>
+</html>
