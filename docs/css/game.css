@@ -367,16 +367,18 @@ body.in-game #global-status {
 
 .turn-tools {
   display: none;
-  gap: 0.25rem;
-  align-items: center;
+  gap: 0.35rem;
+  align-items: stretch;
 }
 
-.btn-mini {
-  min-width: 2rem;
-  padding: 0.3rem 0.45rem !important;
-  font-size: 0.75rem !important;
-  font-weight: 800;
-  line-height: 1;
+.btn-tool {
+  flex: 1;
+  min-height: 2.5rem;
+  padding: 0.45rem 0.5rem !important;
+  font-size: 0.82rem !important;
+  font-weight: 700;
+  line-height: 1.2;
+  white-space: nowrap;
 }
 
 .room-chip--inline {
@@ -1694,8 +1696,8 @@ body.in-game #global-status {
 
 @media (max-width: 640px) {
   :root {
-    --card-w: 62px;
-    --card-h: 86px;
+    --card-w: 78px;
+    --card-h: 108px;
     --radius: 8px;
   }
 
@@ -1766,6 +1768,24 @@ body.in-game #global-status {
 
   body.match-playing .turn-tools {
     display: flex;
+    width: 100%;
+    flex-basis: 100%;
+    margin-top: 0.15rem;
+  }
+
+  body.match-playing .turn-banner {
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+  }
+
+  body.match-playing .turn-banner-main {
+    flex: 1 1 calc(100% - 1px);
+  }
+
+  body.match-playing .btn-tool {
+    min-height: 2.75rem;
+    font-size: 0.8rem !important;
   }
 
   body.match-playing .room-chip--inline {
@@ -1891,11 +1911,12 @@ body.in-game #global-status {
   }
 
   .hand-zone {
-    flex: 1 1 auto;
+    flex: 0 1 auto;
     min-height: 0;
-    overflow-y: auto;
+    max-height: none;
+    overflow-y: visible;
     -webkit-overflow-scrolling: touch;
-    padding: 0.45rem 0.4rem;
+    padding: 0.5rem 0.45rem;
     margin: 0.2rem 0;
     border-width: 2px;
     box-shadow: 0 6px 0 rgba(255, 200, 150, 0.2);
@@ -1935,12 +1956,29 @@ body.in-game #global-status {
     box-shadow: 0 4px 10px rgba(43, 42, 50, 0.1);
   }
 
+  body.match-playing .table-playing {
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
   body.match-playing .card-name {
-    display: none;
+    display: block;
+    font-size: 0.62rem;
+    padding: 0.2rem 0.15rem;
+    line-height: 1.15;
   }
 
   body.match-playing .card img {
-    height: var(--card-h);
+    height: calc(var(--card-h) - 1.35rem);
+  }
+
+  body.match-playing .card-info {
+    width: 1.35rem;
+    height: 1.35rem;
+    top: 3px;
+    right: 3px;
+    font-size: 0.72rem;
+    border-width: 1px;
   }
 
   .card.back {
@@ -2044,8 +2082,8 @@ body.in-game #global-status {
 
 @media (max-width: 640px) and (max-height: 700px) {
   :root {
-    --card-w: 56px;
-    --card-h: 78px;
+    --card-w: 72px;
+    --card-h: 100px;
   }
 
   .turn-banner {

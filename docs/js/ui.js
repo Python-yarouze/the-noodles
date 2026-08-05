@@ -258,9 +258,9 @@ export class GameUI {
           ${roomChip}
         </div>
         <div class="turn-tools">
-          <button type="button" class="btn ghost btn-mini" data-act="open-helper" title="お助け">助</button>
-          <button type="button" class="btn ghost btn-mini" data-act="open-rules" title="ルール">則</button>
-          <button type="button" class="btn ghost btn-mini" data-act="open-ref" title="効果表">表</button>
+          <button type="button" class="btn ghost btn-tool" data-act="open-helper">お助け</button>
+          <button type="button" class="btn ghost btn-tool" data-act="open-rules">ルール</button>
+          <button type="button" class="btn ghost btn-tool" data-act="open-ref">効果表</button>
         </div>
         ${hot}${waitingCpu}
       </div>`;
