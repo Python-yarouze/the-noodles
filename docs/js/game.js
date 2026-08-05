@@ -185,7 +185,24 @@ export class NoodlesGame {
       this._log(`${p.name} が ${got} 枚引きました`);
     }
     this.state.phase = "discard_draw";
-    this._emit({ type: "draw", playerId: p.id, count: got });
+    this._emit({
+      type: "draw",
+      playerId: p.id,
+      playerName: p.name,
+      playerIndex: this.state.turn,
+      count: got,
+      turnStart: true,
+    });
+  }
+
+  _tasteOpponents() {
+    const actor = this.state.pendingAction?.actorIndex;
+    if (actor == null) return [];
+    return this.state.players.filter((_, i) => i !== actor);
+  }
+
+  _tastePassIds() {
+    return this.state.pendingAction?.tastePasses || [];
   }
 
   _clearTasteTimer() {
@@ -216,6 +233,7 @@ export class NoodlesGame {
       drawCount,
       isTruthful,
       actorIndex: this.state.turn,
+      tastePasses: [],
     };
     this.state.usedDiscard1 = true;
     this.state.phase = "taste_window";
@@ -226,6 +244,8 @@ export class NoodlesGame {
       kind: "single",
       declaration,
       actorIndex: this.state.turn,
+      actorName: p.name,
+      drawCount,
     });
     return { ok: true };
   }
@@ -250,12 +270,19 @@ export class NoodlesGame {
       drawCount: 3,
       isTruthful,
       actorIndex: this.state.turn,
+      tastePasses: [],
     };
     this.state.usedDiscard2 = true;
     this.state.phase = "taste_window";
     this._armTasteWindow();
     this._log(`${p.name} がペア（2枚）を宣言して伏せました`);
-    this._emit({ type: "discard_declare", kind: "pair", actorIndex: this.state.turn });
+    this._emit({
+      type: "discard_declare",
+      kind: "pair",
+      actorIndex: this.state.turn,
+      actorName: p.name,
+      drawCount: 3,
+    });
     return { ok: true };
   }
 
@@ -289,6 +316,9 @@ export class NoodlesGame {
     if (tasterIndex === this.state.pendingAction.actorIndex) {
       return { ok: false, reason: "自分の宣言には味見できません" };
     }
+    if (this._tastePassIds().includes(playerId)) {
+      return { ok: false, reason: "パス済みのため味見できません" };
+    }
 
     const taster = this.state.players[tasterIndex];
     if (taster.hand.length === 0 && taster.score <= 4) {
@@ -313,22 +343,37 @@ export class NoodlesGame {
         this._log(`${taster.name} の味見失敗！ 手札をすべて捨てました`);
       }
       this._completePendingDraw(actor, pending);
-      this._checkWin();
-      this._emit({
-        type: "taste_fail",
-        tasterId: playerId,
-        tasterName: taster.name,
-        tasterIndex,
-        actorName: actor.name,
-        actorIndex: pending.actorIndex,
-        penaltyNote,
-      });
+      const won = this._checkWin();
+      if (!won) {
+        this._emit({
+          type: "taste_fail",
+          tasterId: playerId,
+          tasterName: taster.name,
+          tasterIndex,
+          actorName: actor.name,
+          actorIndex: pending.actorIndex,
+          penaltyNote,
+        });
+      }
     } else {
       this.state.discardPile.push(...pending.cards);
-      this._log(
-        `${taster.name} の味見成功！（本当は ${pending.cards.map((c) => c.name).join("・")}）`
-      );
-      taster.nextTurnBonusDraw += 1;
+      const drawCount = pending.drawCount;
+      let rewardDraw = 0;
+      let rewardKind = "bonus";
+      if (this.state.ruleSet === "noodles") {
+        rewardDraw = this._drawTo(taster, drawCount);
+        rewardKind = "instant";
+        this._log(
+          `${taster.name} の味見成功！（本当は ${pending.cards.map((c) => c.name).join("・")}）→ ${rewardDraw}枚獲得`
+        );
+      } else {
+        taster.nextTurnBonusDraw += 1;
+        rewardDraw = 1;
+        rewardKind = "next_turn";
+        this._log(
+          `${taster.name} の味見成功！（本当は ${pending.cards.map((c) => c.name).join("・")}）→ 次ターン+1ドロー`
+        );
+      }
       this.state.pendingAction = null;
       this.state.tasteDeadline = null;
       this.state.phase = "discard_draw";
@@ -340,12 +385,15 @@ export class NoodlesGame {
         actorName: actor.name,
         actorIndex: pending.actorIndex,
         real: pending.cards.map((c) => c.name),
+        rewardDraw,
+        rewardKind,
+        ruleSet: this.state.ruleSet,
       });
     }
     return { ok: true };
   }
 
-  /** Anyone except actor can skip the taste window and continue. */
+  /** Pass on tasting (per player). Resolves only when all non-actors have passed. */
   skipTaste(playerId) {
     if (this.state.phase !== "taste_window" || !this.state.pendingAction) {
       return { ok: false, reason: "今はスキップできません" };
@@ -355,14 +403,36 @@ export class NoodlesGame {
     if (idx === this.state.pendingAction.actorIndex) {
       return { ok: false, reason: "伏せた本人はスキップできません（相手の判断を待ってね）" };
     }
-    this._resolvePending();
+    const passes = this._tastePassIds();
+    if (passes.includes(playerId)) {
+      return { ok: false, reason: "すでにパスしています" };
+    }
+    this.state.pendingAction.tastePasses = [...passes, playerId];
     const skipper = this.state.players[idx];
-    this._emit({
-      type: "taste_skip",
-      playerId,
-      tasterName: skipper?.name,
-      tasterIndex: idx,
-    });
+    const need = this._tasteOpponents().length;
+    const passCount = this.state.pendingAction.tastePasses.length;
+    this._log(`${skipper.name} は味見をパス（${passCount}/${need}）`);
+
+    if (passCount >= need) {
+      this._resolvePending();
+      this._emit({
+        type: "taste_all_passed",
+        playerId,
+        tasterName: skipper?.name,
+        tasterIndex: idx,
+        passCount,
+        need,
+      });
+    } else {
+      this._emit({
+        type: "taste_skip",
+        playerId,
+        tasterName: skipper?.name,
+        tasterIndex: idx,
+        passCount,
+        need,
+      });
+    }
     return { ok: true };
   }
 
@@ -386,9 +456,10 @@ export class NoodlesGame {
   skipDiscardPhase(playerId) {
     if (!this._isMyTurn(playerId)) return { ok: false, reason: "あなたの手番ではありません" };
     if (this.state.phase !== "discard_draw") return { ok: false, reason: "フェーズが違います" };
+    const p = this._current();
     this.state.phase = "cook";
-    this._log(`${this._current().name} は捨てて引くを終えました`);
-    this._emit({ type: "phase_cook" });
+    this._log(`${p.name} は捨てて引くを終えました`);
+    this._emit({ type: "phase_cook", playerName: p.name, playerIndex: this.state.turn });
     return { ok: true };
   }
 
@@ -438,6 +509,7 @@ export class NoodlesGame {
     this._emit({
       type: won ? "cook_win" : "cook",
       playerId: p.id,
+      playerName: p.name,
       names,
       points: v.points,
       score: p.score,
@@ -456,7 +528,14 @@ export class NoodlesGame {
     if (!this.state.cookAcks.includes(playerId)) {
       this.state.cookAcks = [...this.state.cookAcks, playerId];
     }
-    this._emit({ type: "cook_ack", playerId, count: this.state.cookAcks.length });
+    const who = this.state.players.find((p) => p.id === playerId);
+    this._emit({
+      type: "cook_ack",
+      playerId,
+      playerName: who?.name,
+      count: this.state.cookAcks.length,
+      need: this.state.players.length,
+    });
 
     if (this.state.cookAcks.length >= this.state.players.length) {
       this._finishCookReveal();
@@ -476,24 +555,35 @@ export class NoodlesGame {
       this.state.winnerIndex = idx >= 0 ? idx : this.state.turn;
       this.state.phase = "finished";
       this._clearTasteTimer();
-      this._log(`${this.state.players[this.state.winnerIndex]?.name || "?"} の勝利！`);
-      this._emit({ type: "game_over", winnerIndex: this.state.winnerIndex });
+      const winner = this.state.players[this.state.winnerIndex];
+      this._log(`${winner?.name || "?"} の勝利！`);
+      this._emit({
+        type: "game_over",
+        winnerIndex: this.state.winnerIndex,
+        winnerName: winner?.name,
+      });
       return;
     }
 
     this.state.lastCook = null;
     this.state.phase = "end_hand";
-    this._maybeAutoEndHand();
-    this._emit({ type: "cook_reveal_done" });
+    const p = this._current();
+    if (p.hand.length <= HAND_LIMIT) {
+      this._emit({ type: "cook_reveal_done", next: "turn_end" });
+      this._endTurn();
+    } else {
+      this._emit({ type: "cook_reveal_done", next: "end_hand", playerName: p.name });
+    }
   }
 
   skipCook(playerId) {
     if (!this._isMyTurn(playerId)) return { ok: false, reason: "あなたの手番ではありません" };
     if (this.state.phase !== "cook") return { ok: false, reason: "今は料理フェーズではありません" };
+    const p = this._current();
     this.state.phase = "end_hand";
-    this._log(`${this._current().name} は料理しませんでした`);
+    this._log(`${p.name} は料理しませんでした`);
+    this._emit({ type: "skip_cook", playerName: p.name, playerIndex: this.state.turn });
     this._maybeAutoEndHand();
-    this._emit({ type: "skip_cook" });
     return { ok: true };
   }
 
@@ -512,7 +602,6 @@ export class NoodlesGame {
     const need = p.hand.length - HAND_LIMIT;
     if (need <= 0) {
       this._endTurn();
-      this._emit({ type: "turn_end" });
       return { ok: true };
     }
     if (!cardIds || cardIds.length !== need) {
@@ -525,8 +614,8 @@ export class NoodlesGame {
     p.hand = p.hand.filter((c) => !idSet.has(c.id));
     this.state.discardPile.push(...cards);
     this._log(`${p.name} が手札を3枚に整えました`);
+    this._emit({ type: "end_hand", playerName: p.name, discarded: need });
     this._endTurn();
-    this._emit({ type: "turn_end" });
     return { ok: true };
   }
 
@@ -545,6 +634,11 @@ export class NoodlesGame {
         this.state.phase = "finished";
         this._clearTasteTimer();
         this._log(`${this.state.players[i].name} の勝利！`);
+        this._emit({
+          type: "game_over",
+          winnerIndex: i,
+          winnerName: this.state.players[i].name,
+        });
         return true;
       }
     }
@@ -590,6 +684,8 @@ export class NoodlesGame {
             cardCount: s.pendingAction.cards.length,
             actorIndex: s.pendingAction.actorIndex,
             drawCount: s.pendingAction.drawCount,
+            tastePasses: s.pendingAction.tastePasses || [],
+            tastePassNeed: s.players.length - 1,
           }
         : null,
       players: s.players.map((p, i) => ({

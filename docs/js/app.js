@@ -190,9 +190,18 @@ function syncLocalSeat() {
   if (!game || game.state.status !== "playing") return;
   if (game.state.phase === "taste_window" && game.state.pendingAction) {
     const actor = game.state.pendingAction.actorIndex;
-    if (localActiveSeat === actor) {
-      localActiveSeat = (actor + 1) % game.state.players.length;
+    const passes = game.state.pendingAction.tastePasses || [];
+    const n = game.state.players.length;
+    // Prefer an opponent who has not yet passed (and is not actor).
+    for (let step = 1; step < n; step++) {
+      const i = (actor + step) % n;
+      const p = game.state.players[i];
+      if (!passes.includes(p.id)) {
+        localActiveSeat = i;
+        return;
+      }
     }
+    localActiveSeat = (actor + 1) % n;
   } else if (game.state.phase === "cook_reveal") {
     const acks = game.state.cookAcks || [];
     const waiting = game.state.players.findIndex((p) => !acks.includes(p.id));

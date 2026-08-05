@@ -25,6 +25,8 @@ export function decideCpuAction(state) {
 
   if (state.phase === "taste_window" && state.pendingAction) {
     if (state.pendingAction.actorIndex === cpuIndex) return null;
+    const passes = state.pendingAction.tastePasses || [];
+    if (passes.includes(cpu.id)) return null;
     return decideTaste(cpu);
   }
 

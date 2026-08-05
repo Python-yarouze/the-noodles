@@ -29,14 +29,29 @@ export class FxLayer {
     this.ensureMounted();
 
     switch (event.type) {
-      case "draw":
-        this._toast("カードを引いた", "fx-toast-draw");
+      case "draw": {
+        const name = event.playerName || "プレイヤー";
+        const n = event.count ?? 0;
+        if (event.turnStart) {
+          this._splash(`${name} のばん！`, "fx-start");
+          if (n > 0) {
+            setTimeout(() => this._toast(`${name} が ${n} 枚引いた`, "fx-toast-draw"), 500);
+          } else {
+            setTimeout(() => this._toast(`${name} は引けなかった`, "fx-toast-go"), 500);
+          }
+        } else if (n > 0) {
+          this._toast(`${name} が ${n} 枚引いた`, "fx-toast-draw");
+        }
         break;
+      }
       case "discard_declare":
         this._splash(
-          event.kind === "pair" ? "ペアで伏せた！" : `「${event.declaration}」と宣言！`,
+          event.kind === "pair"
+            ? `${event.actorName || ""} ペアで伏せた！`.trim()
+            : `「${event.declaration}」と宣言！`,
           "fx-declare"
         );
+        setTimeout(() => this._toast("味見受付中…", "fx-toast-go"), 700);
         break;
       case "taste_success":
         this._tasteResult(event, true);
@@ -46,20 +61,50 @@ export class FxLayer {
         break;
       case "taste_skip":
         this._toast(
-          `${event.tasterName || "相手"} は味見しなかった`,
+          `${event.tasterName || "相手"} はパス（${event.passCount ?? "?"}/${event.need ?? "?"}）`,
           "fx-toast-go"
         );
         break;
+      case "taste_all_passed":
+        this._toast("全員パス — 続行", "fx-toast-go");
+        break;
       case "taste_timeout":
         this._toast("時間切れ — 味見なしで続行", "fx-toast-go");
+        break;
+      case "phase_cook":
+        this._toast(`${event.playerName || ""} 料理フェーズ`.trim(), "fx-toast-draw");
+        break;
+      case "skip_cook":
+        this._toast(`${event.playerName || "相手"} は料理しなかった`, "fx-toast-go");
         break;
       case "cook":
       case "cook_win":
         this._cook(event);
         if (event.type === "cook_win") this._confetti();
         break;
+      case "cook_ack":
+        this._toast(
+          `確認 ${event.count ?? "?"}/${event.need ?? "?"}（${event.playerName || ""}）`,
+          "fx-toast-go"
+        );
+        break;
+      case "cook_reveal_done":
+        if (event.next === "end_hand") {
+          this._toast("手札を3枚に整えてください", "fx-toast-draw");
+        }
+        break;
+      case "end_hand":
+        this._toast(`${event.playerName || ""} が手札を整えた`, "fx-toast-go");
+        break;
       case "game_start":
         this._splash("スタート！", "fx-start");
+        break;
+      case "game_over":
+        this._splash(`${event.winnerName || "？"} の勝利！`, "fx-start");
+        this._confetti();
+        break;
+      case "join":
+        this._toast(`${event.name || "誰か"} が参加`, "fx-toast-go");
         break;
       default:
         break;
@@ -92,12 +137,19 @@ export class FxLayer {
 
     if (success) {
       const real = (event.real || []).map((n) => escapeHtml(n)).join("・") || "？";
+      let reward = "";
+      if (event.rewardKind === "instant") {
+        reward = `<p class="fx-taste-reward">${event.rewardDraw ?? 0}枚ドロー！</p>`;
+      } else if (event.rewardKind === "next_turn") {
+        reward = `<p class="fx-taste-reward">次ターン +1 ドロー</p>`;
+      }
       el.innerHTML = `
         <div class="fx-taste-inner">
           <p class="fx-taste-badge ok">味見成功</p>
           <p class="fx-taste-who"><strong>${taster}</strong> が味見した</p>
           <p class="fx-taste-detail">${actor} の宣言は嘘だった</p>
           <p class="fx-taste-real">本当の札：${real}</p>
+          ${reward}
         </div>`;
     } else {
       const penalty = escapeHtml(event.penaltyNote || "ペナルティ");
@@ -117,9 +169,11 @@ export class FxLayer {
     const el = document.createElement("div");
     el.className = "fx-cook";
     const names = (event.names || []).map((n) => escapeHtml(n)).join("・");
+    const chef = event.playerName ? `<p class="fx-cook-chef">${escapeHtml(event.playerName)}</p>` : "";
     el.innerHTML = `
       <div class="fx-cook-inner">
         <p class="fx-cook-title">料理完成</p>
+        ${chef}
         <p class="fx-cook-names">${names}</p>
         <p class="fx-cook-points">+${event.points ?? 0}<small>点</small></p>
       </div>`;

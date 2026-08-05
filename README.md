@@ -1,32 +1,9 @@
 # THE NOODLES
 
 「stir fly eighteen」をオマージュしたラーメンカードゲームです。  
-印刷用画像での対面プレイに加え、**ブラウザで 1〜4 人**遊べます（専用サーバー不要・GitHub Pages 向け）。
+印刷用画像での対面プレイに加え、ブラウザでも 1〜4 人で遊べます。
 
-プレイ画面: [`docs/`](docs/)  
-想定公開 URL（Pages 設定後）: `https://python-yarouze.github.io/the-noodles/`
-
----
-
-## ブラウザで遊ぶ
-
-### ローカル確認
-
-```bash
-cd docs
-python -m http.server 8080
-```
-
-ブラウザで `http://localhost:8080` を開きます。
-
-### GitHub Pages
-
-1. リポジトリ Settings → Pages  
-2. Source を **Deploy from a branch**  
-3. Branch: `main` / Folder: **`/docs`**  
-4. Save 後、数分で上記 URL で公開されます
-
-カード画像は英語ファイル名（`docs/assets/cards/*.png`）です。ゲーム内の表示名は日本語のままです。
+**プレイ**: https://python-yarouze.github.io/the-noodles/
 
 ---
 
@@ -50,8 +27,11 @@ python -m http.server 8080
 
 - ホストのブラウザが進行を管理します（タブを閉じると部屋は終了します）
 - カードを選んでからアクション（伏せ札・料理・手札調整）
-- 伏せ札に対し、相手は「味見する」か「進む（味見しない）」
-- 「お助け」で強い組み合わせ・手札の改善案を確認できます
+- 伏せ札への味見は**早いもの勝ち**（最初に味見した1人）。「パス」は個人単位で、全員がパスするか時間切れで続行
+- **味見成功時**
+  - 本家: 伏せ側はドロー不可。味見側は次ターン +1 ドロー
+  - THE NOODLES: 伏せ側はドロー不可。味見側は宣言の予定ドロー枚数を山札から即時獲得（本家の +1 はなし）
+- 「お助け」で手札から作れる料理・改善案・強い組み合わせを確認できます
 - 「ルール」「効果を見る」でルール画像・カード効果を確認できます
 
 ---
@@ -79,24 +59,6 @@ python -m http.server 8080
 pip install pillow
 python noodles_gui.py
 ```
-
----
-
-## 技術メモ
-
-| 項目 | 内容 |
-|------|------|
-| フロント | 静的 HTML / CSS / ES Modules（`docs/`） |
-| 通信 | PeerJS（WebRTC）。シグナリングのみ公開 PeerServer、進行はホスト権威 |
-| ソロ | クライアント内の簡易 CPU（`docs/js/ai.js`） |
-
-主要ファイル:
-
-- `docs/js/game.js` — 進行・ルール  
-- `docs/js/scoring.js` — 得点計算  
-- `docs/js/ui.js` — 画面  
-- `docs/js/peer-room.js` — P2P 部屋  
-- `docs/js/deck.js` — デッキ・画像パス対応表  
 
 ---
 

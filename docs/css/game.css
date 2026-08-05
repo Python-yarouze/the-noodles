@@ -1213,12 +1213,50 @@ body.in-game #global-status {
   color: var(--coral);
 }
 
+.detail-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem 1.25rem;
+  margin: 0;
+}
+
 .detail-base span,
+.detail-count span,
+.detail-effect span,
 .detail-discard span {
   display: block;
   font-size: 0.72rem;
   color: var(--muted);
   font-weight: 700;
+}
+
+.detail-base,
+.detail-count {
+  margin: 0;
+  font-weight: 700;
+  font-size: 1.05rem;
+}
+
+.ref-stats {
+  display: block;
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: var(--muted);
+  margin-top: 0.1rem;
+}
+
+.detail-effect,
+.detail-discard {
+  margin: 0.55rem 0 0;
+  line-height: 1.45;
+  font-size: 0.92rem;
+}
+
+.ref-discard {
+  margin: 0.25rem 0 0;
+  font-size: 0.78rem;
+  color: var(--muted);
+  line-height: 1.35;
 }
 
 .ref-modal {
@@ -1437,7 +1475,8 @@ body.in-game #global-status {
 }
 
 .fx-taste-real,
-.fx-taste-penalty {
+.fx-taste-penalty,
+.fx-taste-reward {
   margin: 0.55rem 0 0;
   font-weight: 800;
   font-size: 1rem;
@@ -1449,6 +1488,17 @@ body.in-game #global-status {
 
 .fx-taste-penalty {
   color: #8b3a4a;
+}
+
+.fx-taste-reward {
+  color: var(--accent);
+}
+
+.fx-cook-chef {
+  margin: 0.2rem 0 0;
+  font-weight: 700;
+  color: var(--muted);
+  font-size: 0.9rem;
 }
 
 .fx-cook {
@@ -1710,26 +1760,22 @@ body.in-game #global-status {
   }
 
   body.in-game {
-    display: flex;
-    flex-direction: column;
-    padding: 0.2rem 0.25rem 0;
-    padding-bottom: max(0.2rem, env(safe-area-inset-bottom));
-    overflow: hidden;
-    height: 100dvh;
-    height: 100svh;
+    display: block;
+    padding: 0.2rem 0.25rem max(0.5rem, env(safe-area-inset-bottom));
+    overflow: auto;
+    height: auto;
+    min-height: 100dvh;
+    min-height: 100svh;
   }
 
   body.in-game #table {
-    flex: 1;
+    display: block;
+    overflow: visible;
     min-height: 0;
-    overflow: hidden;
-    display: flex;
-    flex-direction: column;
   }
 
   body.match-finished #table {
-    overflow-y: auto;
-    -webkit-overflow-scrolling: touch;
+    overflow: visible;
   }
 
   .hero {
@@ -1757,9 +1803,13 @@ body.in-game #global-status {
 
   .table-playing {
     max-width: 100%;
-    height: 100%;
+    height: auto;
     min-height: 0;
-    overflow: hidden;
+    overflow: visible;
+  }
+
+  body.match-playing .table-playing {
+    overflow: visible;
   }
 
   body.match-playing .table-header {
@@ -1956,11 +2006,6 @@ body.in-game #global-status {
     box-shadow: 0 4px 10px rgba(43, 42, 50, 0.1);
   }
 
-  body.match-playing .table-playing {
-    overflow-y: auto;
-    -webkit-overflow-scrolling: touch;
-  }
-
   body.match-playing .card-name {
     display: block;
     font-size: 0.62rem;
@@ -2011,12 +2056,11 @@ body.in-game #global-status {
 
   .actions {
     flex-shrink: 0;
-    margin: 0.15rem 0 0.25rem;
-    position: sticky;
-    bottom: 0;
-    z-index: 6;
-    background: linear-gradient(transparent, var(--bg) 24%);
-    padding-bottom: 0.15rem;
+    margin: 0.35rem 0 0.5rem;
+    position: static;
+    z-index: auto;
+    background: transparent;
+    padding-bottom: 0.25rem;
   }
 
   .action-block .btn {

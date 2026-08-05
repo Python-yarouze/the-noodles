@@ -2,7 +2,7 @@
  * Playful table UI — select-then-act, turn banner, 2–4 players, previews.
  */
 
-import { cardImagePath, WIN_SCORE, RULE_LABELS, categoryOf, RULES_IMAGE, EFFECT_CHART_IMAGE } from "./deck.js";
+import { cardImagePath, WIN_SCORE, RULE_LABELS, categoryOf, RULES_IMAGE } from "./deck.js";
 import { explainScore, validateCookSet } from "./scoring.js";
 import { getCardEffect, effectsByCategory } from "./card-effects.js";
 import { FxLayer } from "./fx.js";
@@ -30,7 +30,6 @@ export class GameUI {
     this._lastMeta = {};
     this.detailName = null;
     this.showReference = false;
-    this.showEffectSheet = false;
     this.showRules = false;
     this.fx = new FxLayer(root);
     this._lastPhase = null;
@@ -112,6 +111,11 @@ export class GameUI {
       view.phase === "taste_window" &&
       view.pendingPublic &&
       view.pendingPublic.actorIndex !== view.myIndex;
+    const myId = view.players[view.myIndex]?.id;
+    const tastePassed =
+      tasteOpen && (view.pendingPublic.tastePasses || []).includes(myId);
+    const passCount = view.pendingPublic?.tastePasses?.length || 0;
+    const passNeed = view.pendingPublic?.tastePassNeed || Math.max(0, view.players.length - 1);
 
     // Auto-select mode for cook/end: selection always on in those phases
     const selectable =
@@ -168,15 +172,18 @@ export class GameUI {
           }
           ${
             tasteOpen
-              ? `<div class="taste-actions">
+              ? tastePassed
+                ? `<p class="hint big-hint">パス済み — 他の人の判断待ち（${passCount}/${passNeed}）</p>`
+                : `<div class="taste-actions">
                   <button type="button" class="btn danger big taste-btn" data-act="taste">味見する</button>
-                  <button type="button" class="btn ghost" data-act="skipTaste">進む（味見しない）</button>
+                  <button type="button" class="btn ghost" data-act="skipTaste">パス（味見しない）</button>
+                  <p class="hint">早いもの勝ち ／ パス ${passCount}/${passNeed}</p>
                 </div>`
               : ""
           }
           ${
             view.phase === "taste_window" && myTurn
-              ? `<p class="hint big-hint">相手の味見待ち…</p>`
+              ? `<p class="hint big-hint">相手の味見待ち…（パス ${passCount}/${passNeed}）</p>`
               : ""
           }
         </section>
@@ -372,7 +379,7 @@ export class GameUI {
       ${this.showHelper ? this._helperPanelHtml(view) : ""}
       ${this.showRules ? this._rulesPanelHtml() : ""}
       ${this.showReference ? this._referencePanelHtml(view?.ruleSet || "noodles") : ""}
-      ${this.detailName ? this._detailModalHtml(this.detailName) : ""}
+      ${this.detailName ? this._detailModalHtml(this.detailName, view?.ruleSet || "noodles") : ""}
     `;
   }
 
@@ -455,8 +462,8 @@ export class GameUI {
       </div>`;
   }
 
-  _detailModalHtml(name) {
-    const fx = getCardEffect(name);
+  _detailModalHtml(name, ruleSet = "noodles") {
+    const fx = getCardEffect(name, ruleSet);
     return `
       <div class="modal-backdrop" data-act="close-detail">
         <div class="modal detail-modal" onclick="event.stopPropagation()">
@@ -466,9 +473,12 @@ export class GameUI {
             <div class="detail-body">
               <p class="detail-cat">${escapeHtml(fx?.category || categoryOf(name))}</p>
               <h2 class="detail-title">${escapeHtml(name)}</h2>
-              <p class="detail-base"><span>点数</span> ${escapeHtml(fx?.base || "—")}</p>
-              <p class="detail-effect">${escapeHtml(fx?.effect || "")}</p>
-              ${fx?.discard ? `<p class="detail-discard"><span>捨て札</span> ${escapeHtml(fx.discard)}</p>` : ""}
+              <p class="detail-meta">
+                <span class="detail-base"><span>点数</span> ${escapeHtml(fx?.base || "—")}</span>
+                <span class="detail-count"><span>枚数</span> ${escapeHtml(fx?.countLabel || "—")}</span>
+              </p>
+              <p class="detail-effect"><span>料理</span> ${escapeHtml(fx?.effect || "")}</p>
+              ${fx?.discard ? `<p class="detail-discard">${escapeHtml(fx.discard)}</p>` : ""}
             </div>
           </div>
         </div>
@@ -482,38 +492,30 @@ export class GameUI {
         <div class="modal ref-modal" onclick="event.stopPropagation()">
           <header class="ref-header">
             <h2>カードの効果</h2>
-            <div class="ref-actions">
-              <button type="button" class="btn ghost" data-act="toggle-sheet">
-                ${this.showEffectSheet ? "一覧" : "効果表"}
-              </button>
-              <button type="button" class="modal-close" data-act="close-ref">×</button>
-            </div>
+            <button type="button" class="modal-close" data-act="close-ref">×</button>
           </header>
-          ${
-            this.showEffectSheet
-              ? `<div class="ref-sheet"><img src="${EFFECT_CHART_IMAGE}" alt="効果表" /></div>`
-              : `<div class="ref-list">${groups
-                  .map(
-                    (g) => `
-                <section class="ref-group">
-                  <h3>${escapeHtml(g.label)}</h3>
-                  ${g.cards
-                    .map(
-                      (c) => `
-                    <button type="button" class="ref-row ${c.inSet ? "" : "dim"}" data-info="${escapeHtml(c.name)}">
-                      <img src="${cardImagePath(c.name)}" alt="" />
-                      <div>
-                        <strong>${escapeHtml(c.name)}</strong>
-                        <span>${escapeHtml(c.base)}</span>
-                        <p>${escapeHtml(c.effect)}</p>
-                      </div>
-                    </button>`
-                    )
-                    .join("")}
-                </section>`
-                  )
-                  .join("")}</div>`
-          }
+          <div class="ref-list">${groups
+            .map(
+              (g) => `
+            <section class="ref-group">
+              <h3>${escapeHtml(g.label)}</h3>
+              ${g.cards
+                .map(
+                  (c) => `
+                <button type="button" class="ref-row ${c.inSet ? "" : "dim"}" data-info="${escapeHtml(c.name)}">
+                  <img src="${cardImagePath(c.name)}" alt="" />
+                  <div>
+                    <strong>${escapeHtml(c.name)}</strong>
+                    <span class="ref-stats">${escapeHtml(c.base)} ／ ${escapeHtml(c.countLabel)}</span>
+                    <p>${escapeHtml(c.effect)}</p>
+                    ${c.discard ? `<p class="ref-discard">${escapeHtml(c.discard)}</p>` : ""}
+                  </div>
+                </button>`
+                )
+                .join("")}
+            </section>`
+            )
+            .join("")}</div>
         </div>
       </div>`;
   }
@@ -592,10 +594,7 @@ export class GameUI {
           <button type="button" class="btn primary big" data-act="confirm-cook" ${canCook ? "" : "disabled"}>
             料理する
           </button>
-          <div class="action-row">
-            <button type="button" class="btn ghost" data-act="auto-select-best">最強コンボを選択</button>
-            <button type="button" class="btn ghost" data-act="skip-cook">料理しない</button>
-          </div>
+          <button type="button" class="btn ghost" data-act="skip-cook">料理しない</button>
         </div>`;
     }
 
@@ -715,15 +714,10 @@ export class GameUI {
         break;
       case "open-ref":
         this.showReference = true;
-        this.showEffectSheet = false;
         this.render(view, this._lastMeta);
         break;
       case "close-ref":
         this.showReference = false;
-        this.render(view, this._lastMeta);
-        break;
-      case "toggle-sheet":
-        this.showEffectSheet = !this.showEffectSheet;
         this.render(view, this._lastMeta);
         break;
       case "close-detail":
@@ -747,26 +741,6 @@ export class GameUI {
         this.onAction("declarePair", { cardIdA: sel[0], cardIdB: sel[1] });
         this.selected.clear();
         break;
-      case "auto-select-best": {
-        const me = view.players[view.myIndex];
-        const handNames = (me?.hand || []).map((c) => c.name);
-        const best = bestCooksFromHand(handNames, view.ruleSet);
-        if (best.length > 0) {
-          const bestNames = best[0].cards;
-          this.selected.clear();
-          // Find IDs for these names
-          const handCopy = [...(me?.hand || [])];
-          for (const name of bestNames) {
-            const idx = handCopy.findIndex((c) => c.name === name);
-            if (idx >= 0) {
-              this.selected.add(handCopy[idx].id);
-              handCopy.splice(idx, 1);
-            }
-          }
-          this.render(view, this._lastMeta);
-        }
-        break;
-      }
       case "confirm-cook": {
         const me = view.players[view.myIndex];
         const byId = Object.fromEntries((me?.hand || []).map((c) => [c.id, c]));
