@@ -31,12 +31,18 @@ function showLobby() {
   lobbyEl.hidden = false;
   tableEl.hidden = true;
   tableEl.innerHTML = "";
+  document.body.classList.remove("in-game", "match-playing", "match-finished");
+  document.body.classList.add("in-lobby");
+  syncGlobalStatus();
 }
 
 function showTable() {
   lobbyEl.hidden = true;
   tableEl.hidden = false;
+  document.body.classList.remove("in-lobby");
+  document.body.classList.add("in-game");
   ui = new GameUI(tableEl, { onAction: handleUiAction });
+  syncGlobalStatus();
   refresh();
 }
 
@@ -64,8 +70,23 @@ function clearCpuTimer() {
 
 function setStatus(msg) {
   connectionStatus = msg;
-  if (statusEl) statusEl.textContent = msg;
+  syncGlobalStatus();
   refresh();
+}
+
+/** Hide top status bar while the table (or an active match) is visible. */
+function syncGlobalStatus() {
+  if (!statusEl) return;
+  const onTable = tableEl && !tableEl.hidden;
+  const inMatch =
+    game?.state?.status === "playing" || game?.state?.status === "finished";
+  if (onTable || inMatch || !connectionStatus) {
+    statusEl.textContent = "";
+    statusEl.hidden = true;
+    return;
+  }
+  statusEl.hidden = false;
+  statusEl.textContent = connectionStatus;
 }
 
 function selectedRuleSet() {
@@ -106,6 +127,7 @@ function refresh() {
       game.state.players.length >= 2,
   };
   ui.setMeta(meta);
+  syncGlobalStatus();
 
   if (role === "solo" && game) {
     const view = game.viewFor("local-0");
@@ -195,6 +217,10 @@ function handleHostAction(playerId, type, payload, { skipRefresh = false } = {})
   switch (type) {
     case "startGame":
       result = game.startGame();
+      if (result.ok) {
+        connectionStatus = "";
+        syncGlobalStatus();
+      }
       break;
     case "setRuleSet":
       result = game.setRuleSet(payload.ruleSet);
@@ -307,6 +333,10 @@ function onPeerMessage(msg, meta = {}) {
   if (role === "guest") {
     if (msg.type === "state") {
       window.__lastGuestView = msg.view;
+      if (msg.view?.status === "playing" || msg.view?.status === "finished") {
+        connectionStatus = "";
+        syncGlobalStatus();
+      }
       refresh();
       return;
     }
@@ -388,7 +418,7 @@ function startSolo() {
   game.addPlayer("local-0", name);
   game.addPlayer("cpu-0", "CPU", { isCpu: true });
   game.startGame();
-  connectionStatus = "1人プレイ（vs CPU）";
+  connectionStatus = "";
   showTable();
   refresh();
 }
@@ -410,7 +440,7 @@ function startLocal() {
   }
   game.startGame();
   localActiveSeat = 0;
-  connectionStatus = `同じPC・${count}人ホットシート`;
+  connectionStatus = "";
   showTable();
   refresh();
 }

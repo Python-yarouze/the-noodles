@@ -42,6 +42,9 @@ export class GameUI {
     this._lastMeta = meta;
     const { connectionStatus = "", role = "", roomId = "", canStart = false } = meta;
 
+    document.body.classList.toggle("match-playing", view?.status === "playing");
+    document.body.classList.toggle("match-finished", view?.status === "finished");
+
     if (view?.phase && view.phase !== this._lastPhase) {
       this.selected.clear();
       this._lastPhase = view.phase;
@@ -116,8 +119,8 @@ export class GameUI {
       (view.phase === "discard_draw" || view.phase === "cook" || view.phase === "end_hand");
 
     this.root.innerHTML = `
-      <div class="table-shell">
-        ${this._turnBanner(view, myTurn, role)}
+      <div class="table-shell table-playing">
+        ${this._turnBanner(view, myTurn, role, roomId)}
         <header class="table-header">
           <div class="brand">THE NOODLES</div>
           <div class="meta">
@@ -234,22 +237,31 @@ export class GameUI {
       </div>`;
   }
 
-  _turnBanner(view, myTurn, role) {
+  _turnBanner(view, myTurn, role, roomId = "") {
     const cur = view.players[view.turn];
     const color = SEAT_COLORS[view.turn % 4];
     const phase = PHASE_JP[view.phase] || view.phase;
-    const you = myTurn ? "（あなたのばん！）" : "";
+    const you = myTurn ? "（あなた）" : "";
     const hot =
-      role === "local" ? `<span class="hot-tag">いま操作：${escapeHtml(cur?.name || "")}</span>` : "";
+      role === "local" ? `<span class="hot-tag">操作：${escapeHtml(cur?.name || "")}</span>` : "";
     const waitingCpu =
       role === "solo" && !myTurn && view.phase !== "taste_window" && view.phase !== "cook_reveal"
-        ? `<span class="hot-tag">CPU思考中…</span>`
+        ? `<span class="hot-tag">CPU…</span>`
         : "";
+    const roomChip = roomId ? `<span class="room-chip room-chip--inline">${escapeHtml(roomId)}</span>` : "";
     return `
       <div class="turn-banner" style="--seat:${color}">
-        <strong>${escapeHtml(cur?.name || "?")} のばん！</strong>
-        <span class="turn-phase">${phase}</span>
-        <span class="turn-you">${you}</span>
+        <div class="turn-banner-main">
+          <strong>${escapeHtml(cur?.name || "?")}</strong>
+          <span class="turn-phase">${phase}</span>
+          <span class="turn-you">${you}</span>
+          ${roomChip}
+        </div>
+        <div class="turn-tools">
+          <button type="button" class="btn ghost btn-mini" data-act="open-helper" title="お助け">助</button>
+          <button type="button" class="btn ghost btn-mini" data-act="open-rules" title="ルール">則</button>
+          <button type="button" class="btn ghost btn-mini" data-act="open-ref" title="効果表">表</button>
+        </div>
         ${hot}${waitingCpu}
       </div>`;
   }
