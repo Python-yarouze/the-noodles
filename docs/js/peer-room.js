@@ -1,12 +1,46 @@
 /**
  * PeerJS room helpers — host can hold multiple guest connections.
+ * Uses Open Relay (Metered) TURN when TURN_CREDENTIALS_URL is set in ice-config.js.
  */
+
+const GUEST_CONNECT_TIMEOUT_MS = 20000;
+const FALLBACK_ICE_SERVERS = [{ urls: "stun:stun.l.google.com:19302" }];
 
 export function makeRoomCode() {
   const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
   let s = "";
   for (let i = 0; i < 6; i++) s += chars[Math.floor(Math.random() * chars.length)];
   return s;
+}
+
+async function loadTurnCredentialsUrl() {
+  try {
+    const mod = await import("./ice-config.js");
+    return typeof mod.TURN_CREDENTIALS_URL === "string" ? mod.TURN_CREDENTIALS_URL.trim() : "";
+  } catch {
+    return "";
+  }
+}
+
+async function fetchIceServers(onStatus) {
+  const url = await loadTurnCredentialsUrl();
+  if (!url || url.includes("YOUR_API_KEY")) {
+    onStatus?.("TURN未設定 — STUNのみで接続を試行");
+    return FALLBACK_ICE_SERVERS;
+  }
+  try {
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const iceServers = await res.json();
+    if (!Array.isArray(iceServers) || iceServers.length === 0) {
+      throw new Error("empty iceServers");
+    }
+    return iceServers;
+  } catch (e) {
+    console.warn("TURN credentials fetch failed", e);
+    onStatus?.("TURN取得失敗 — STUNのみで接続を試行");
+    return FALLBACK_ICE_SERVERS;
+  }
 }
 
 export class PeerRoom {
@@ -32,9 +66,26 @@ export class PeerRoom {
       throw new Error("PeerJS missing");
     }
 
+    const iceServers = await fetchIceServers((msg) => this.onStatus(msg));
+
     return new Promise((resolve, reject) => {
       const id = this.role === "host" ? `noodles-${this.roomId}` : undefined;
-      this.peer = new Peer(id, { debug: 1 });
+      this.peer = new Peer(id, {
+        debug: 1,
+        config: { iceServers },
+      });
+
+      let settled = false;
+      const fail = (err) => {
+        if (settled) return;
+        settled = true;
+        reject(err);
+      };
+      const ok = (value) => {
+        if (settled) return;
+        settled = true;
+        resolve(value);
+      };
 
       this.peer.on("open", (peerId) => {
         this.onStatus(this.role === "host" ? `部屋待機中: ${this.roomId}` : `接続中…`);
@@ -42,9 +93,22 @@ export class PeerRoom {
         if (this.role === "guest") {
           const hostId = `noodles-${this.roomId}`;
           this.conn = this.peer.connect(hostId, { reliable: true });
-          this._bindConn(this.conn, resolve, reject);
+          this._bindConn(this.conn, ok, fail);
+
+          window.setTimeout(() => {
+            if (settled || this.connected) return;
+            this.onStatus(
+              "接続がタイムアウトしました。このネットワークではつながりにくいことがあります（モバイル回線や別Wi-Fiを試してください）"
+            );
+            try {
+              this.conn?.close();
+            } catch (_) {
+              /* ignore */
+            }
+            fail(new Error("guest connect timeout"));
+          }, GUEST_CONNECT_TIMEOUT_MS);
         } else {
-          resolve(this.roomId);
+          ok(this.roomId);
         }
       });
 
@@ -63,12 +127,16 @@ export class PeerRoom {
 
       this.peer.on("error", (err) => {
         this.onStatus(`Peer エラー: ${err.type || err.message || err}`);
-        reject(err);
+        fail(err);
       });
 
       this.peer.on("disconnected", () => {
         this.onStatus("シグナリングから切断。再接続を試行…");
-        this.peer.reconnect();
+        try {
+          this.peer.reconnect();
+        } catch (_) {
+          /* ignore */
+        }
       });
     });
   }

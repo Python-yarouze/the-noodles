@@ -1,0 +1,12 @@
+# Local / CI-generated TURN config (contains API key). See ice-config.example.js
+docs/js/ice-config.js
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.Python
+.venv/
+venv/
+.env
+.env.*

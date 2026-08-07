@@ -7,6 +7,29 @@
 
 ---
 
+## デプロイ（GitHub Pages）
+
+公開サイトは **GitHub Actions** からデプロイします（`docs/` を配信）。
+
+1. リポジトリ Settings → Pages → Build and deployment → Source を **GitHub Actions** にする  
+2. Actions Secret `METERED_API_KEY` に Metered（Open Relay）の Credential API Key を登録済みであること  
+3. `main` への push、または Actions の「Deploy GitHub Pages」を手動実行  
+
+オンライン対戦の NAT 越え用に Open Relay（`fulline.metered.live`）の TURN を使います。API Key はデプロイ時だけ `docs/js/ice-config.js` に埋め込まれ、リポジトリには含まれません。
+
+### ローカル確認
+
+```bash
+cp docs/js/ice-config.example.js docs/js/ice-config.js
+# ice-config.js の YOUR_API_KEY を自分のキーに置換
+cd docs
+python -m http.server 8080
+```
+
+`docs/js/ice-config.js` は gitignore されています。
+
+---
+
 ## 遊び方（ロビー）
 
 | モード | 手順 |
