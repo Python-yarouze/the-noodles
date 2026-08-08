@@ -49,6 +49,7 @@ export function createEmptyState() {
     winnerIndex: null,
     log: [],
     tasteDeadline: null,
+    cookRevealDeadline: null,
     lastEvent: null,
     lastCook: null,
     cookHistory: [],
@@ -57,10 +58,14 @@ export function createEmptyState() {
   };
 }
 
+/** Seconds to auto-advance cook reveal if not everyone acks. */
+export const COOK_REVEAL_TIMEOUT_MS = 15000;
+
 export class NoodlesGame {
   constructor() {
     this.state = createEmptyState();
     this._tasteTimer = null;
+    this._cookRevealTimer = null;
     this.onChange = null;
   }
 
@@ -71,6 +76,25 @@ export class NoodlesGame {
 
   _log(msg) {
     this.state.log = [...this.state.log.slice(-40), msg];
+  }
+
+  _clearCookRevealTimer() {
+    if (this._cookRevealTimer) {
+      clearTimeout(this._cookRevealTimer);
+      this._cookRevealTimer = null;
+    }
+    this.state.cookRevealDeadline = null;
+  }
+
+  _armCookRevealTimer() {
+    this._clearCookRevealTimer();
+    this.state.cookRevealDeadline = Date.now() + COOK_REVEAL_TIMEOUT_MS;
+    this._cookRevealTimer = setTimeout(() => {
+      this._cookRevealTimer = null;
+      if (this.state.phase !== "cook_reveal") return;
+      this._log("料理確認の時間切れ — 自動で次へ");
+      this._finishCookReveal();
+    }, COOK_REVEAL_TIMEOUT_MS + 30);
   }
 
   setRuleSet(ruleSet) {
@@ -109,6 +133,9 @@ export class NoodlesGame {
     if (n > MAX_PLAYERS) {
       return { ok: false, reason: `最大${MAX_PLAYERS}人までです` };
     }
+    this._clearTasteTimer();
+    this._clearCookRevealTimer();
+    this.state.players = shuffle(this.state.players);
     this.state.deck = buildDeck(this.state.ruleSet);
     this.state.discardPile = [];
     this.state.winnerIndex = null;
@@ -125,6 +152,8 @@ export class NoodlesGame {
         this._drawTo(p, 1);
       }
     }
+    const order = this.state.players.map((p) => p.name).join(" → ");
+    this._log(`手番順: ${order}`);
     const label = RULE_LABELS[this.state.ruleSet] || this.state.ruleSet;
     const goal = this.state.winScore;
     const tasteLabel = this.state.tasteWindowMs
@@ -146,6 +175,7 @@ export class NoodlesGame {
     this.state.lastCook = null;
     this.state.cookAcks = [];
     this.state.pendingWin = false;
+    this._clearCookRevealTimer();
     this.state.phase = "draw";
     this._autoDraw();
   }
@@ -505,6 +535,7 @@ export class NoodlesGame {
     this.state.cookAcks = [];
     this.state.pendingWin = won;
     this.state.phase = "cook_reveal";
+    this._armCookRevealTimer();
 
     this._emit({
       type: won ? "cook_win" : "cook",
@@ -544,6 +575,7 @@ export class NoodlesGame {
   }
 
   _finishCookReveal() {
+    this._clearCookRevealTimer();
     const won = this.state.pendingWin;
     this.state.cookAcks = [];
     this.state.pendingWin = false;
@@ -668,6 +700,7 @@ export class NoodlesGame {
       usedDiscard2: s.usedDiscard2,
       cookedThisTurn: s.cookedThisTurn,
       tasteDeadline: s.tasteDeadline,
+      cookRevealDeadline: s.cookRevealDeadline,
       winnerIndex: s.winnerIndex,
       deckCount: s.deck.length,
       discardCount: s.discardPile.length,

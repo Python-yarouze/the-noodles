@@ -10,6 +10,27 @@ function anyOf(cards, list) {
   return list.some((n) => cards.includes(n));
 }
 
+/** Unconditional base points (no combo bonuses / penalties). */
+export const BASE_POINTS = {
+  めん: 1,
+  ごはん: 1,
+  えび: 6,
+  もやし: 0,
+  めんま: 2,
+  みそ: 1,
+  ぶた: 5,
+  バター: 1,
+  ねぎ: 3,
+  にんにく: -2,
+  とり: 3,
+  たまご: 3,
+  しょうゆ: 1,
+  しょうが: 2,
+  しお: 0,
+  コーン: 1,
+  きのこ: 2,
+};
+
 const scorers = {
   めん() {
     return 1;
@@ -102,7 +123,9 @@ const scorers = {
 export function scoreLines(cards) {
   return cards.map((name) => {
     const fn = scorers[name];
-    return { name, points: fn ? fn(cards) : 0 };
+    const points = fn ? fn(cards) : 0;
+    const base = BASE_POINTS[name] ?? 0;
+    return { name, points, base };
   });
 }
 

@@ -76,6 +76,9 @@ export class GameUI {
               ? `<button type="button" class="btn primary big" data-act="startGame">はじめる</button>`
               : `<p class="hint">2〜4人になったらホストが「はじめる」を押してください</p>`
           }
+          <div class="result-actions" style="margin-top:1rem">
+            <button type="button" class="btn ghost" data-act="lobby">ホームへ</button>
+          </div>
         </div>
         ${this._overlaysHtml(view)}`;
       this._bindAll();
@@ -86,14 +89,21 @@ export class GameUI {
     if (view.status === "finished") {
       const winner = view.players[view.winnerIndex];
       const goal = view.winScore ?? WIN_SCORE;
+      const canRematch = role === "host" || role === "solo" || role === "local";
       this.root.innerHTML = `
         <div class="panel finished result-panel">
+          ${this._disconnectBanner(connectionStatus)}
           <h2>${escapeHtml(winner?.name || "？")} の勝利</h2>
           <p class="result-sub">${goal}点先取</p>
           ${this._resultScoreboard(view)}
           ${this._cookHistoryHtml(view)}
           <div class="result-actions">
-            <button type="button" class="btn primary" data-act="lobby">ロビーへ</button>
+            ${
+              canRematch
+                ? `<button type="button" class="btn primary" data-act="rematch">もう一度プレイ</button>`
+                : `<p class="hint">ホストが再戦できます</p>`
+            }
+            <button type="button" class="btn ${canRematch ? "ghost" : "primary"}" data-act="lobby">ロビーへ</button>
             <button type="button" class="btn ghost" data-act="open-rules">ルール</button>
             <button type="button" class="btn ghost" data-act="open-ref">効果を見る</button>
           </div>
@@ -124,6 +134,7 @@ export class GameUI {
 
     this.root.innerHTML = `
       <div class="table-shell table-playing">
+        ${this._disconnectBanner(connectionStatus)}
         ${this._turnBanner(view, myTurn, role, roomId)}
         <header class="table-header">
           <div class="brand">THE NOODLES</div>
@@ -237,10 +248,24 @@ export class GameUI {
         ${dish.won ? `<p class="cook-reveal-win">勝利条件達成！</p>` : ""}
         <p class="hint">全員が確認すると続きます（${ackCount}/${need}）</p>
         ${
+          view.cookRevealDeadline
+            ? `<p class="hint cook-reveal-auto">自動で進みます（<span class="timer" data-deadline="${view.cookRevealDeadline}"></span>）</p>`
+            : ""
+        }
+        ${
           acked
             ? `<p class="hint">確認済み — 他の人を待っています</p>`
             : `<button type="button" class="btn primary big" data-act="ackCookReveal">確認して次へ</button>`
         }
+      </div>`;
+  }
+
+  _disconnectBanner(connectionStatus) {
+    if (!connectionStatus) return "";
+    return `
+      <div class="disconnect-banner" role="alert">
+        <p>${escapeHtml(connectionStatus)}</p>
+        <button type="button" class="btn ghost" data-act="lobby">ホームへ</button>
       </div>`;
   }
 
@@ -298,7 +323,11 @@ export class GameUI {
         ? { ok: false, reason: `あと ${3 - names.length} まい` }
         : validateCookSet(names, ruleSet);
     const lines = explained.lines
-      .map((l) => `<li><span>${escapeHtml(l.name)}</span><strong>${l.points}</strong></li>`)
+      .map((l) => {
+        const cls =
+          l.points > l.base ? "cook-line-boost" : l.points < l.base ? "cook-line-cut" : "";
+        return `<li class="${cls}"><span>${escapeHtml(l.name)}</span><strong>${l.points}</strong></li>`;
+      })
       .join("");
     return `
       <div class="cook-preview ${validation.ok ? "valid" : "invalid"}">
@@ -547,26 +576,25 @@ export class GameUI {
       const n = this.selected.size;
       const blocked1 = view.usedDiscard1;
       const blocked2 = view.usedDiscard2;
+      const dis1 = blocked1 ? "disabled" : "";
       return `
         <div class="action-block stack">
           ${
             n === 0
-              ? `<button type="button" class="btn primary big" data-act="skip-discard">このまま料理へ →</button>`
+              ? `
+            <button type="button" class="btn primary big" data-act="skip-discard">このまま料理へ →</button>
+            <button type="button" class="btn ghost" data-act="skip-all-cook">料理しない</button>`
               : ""
           }
           ${
             n === 1
               ? `
-            <label class="decl-label">宣言するカード
-              <select id="decl-select">
-                <option value="とり">とり（2枚引き）</option>
-                <option value="ぶた">ぶた（3枚引き）</option>
-                <option value="えび">えび（4枚引き）</option>
-              </select>
-            </label>
-            <button type="button" class="btn danger big" data-act="confirm-single" ${blocked1 ? "disabled" : ""}>
-              1枚伏せて引く
-            </button>
+            <p class="decl-label">宣言して1枚伏せる</p>
+            <div class="decl-btns">
+              <button type="button" class="btn danger" data-act="confirm-single" data-decl="とり" ${dis1}>とり（2枚引き）</button>
+              <button type="button" class="btn danger" data-act="confirm-single" data-decl="ぶた" ${dis1}>ぶた（3枚引き）</button>
+              <button type="button" class="btn danger" data-act="confirm-single" data-decl="えび" ${dis1}>えび（4枚引き）</button>
+            </div>
             ${blocked1 ? `<p class="hint">1枚捨ては使用済みです</p>` : ""}`
               : ""
           }
@@ -581,7 +609,7 @@ export class GameUI {
           }
           ${n > 0 ? `<button type="button" class="btn ghost" data-act="clear-sel">選択をクリア</button>` : ""}
         </div>
-        <p class="hint">カードを1〜2枚選んでからボタンを押してください</p>`;
+        <p class="hint">${n === 0 ? "カードを選ぶか、料理へ進む／料理しないを選んでください" : "カードを1〜2枚選んでからボタンを押してください"}</p>`;
     }
 
     if (view.phase === "cook") {
@@ -630,7 +658,7 @@ export class GameUI {
     this.root.querySelectorAll("[data-act]").forEach((btn) => {
       btn.addEventListener("click", (e) => {
         e.stopPropagation();
-        this._handleAct(btn.getAttribute("data-act"));
+        this._handleAct(btn.getAttribute("data-act"), btn);
       });
     });
   }
@@ -675,14 +703,16 @@ export class GameUI {
     this.render(this.lastView, this._lastMeta);
   }
 
-  _handleAct(act) {
+  _handleAct(act, btn = null) {
     const sel = [...this.selected];
-    const declEl = this.root.querySelector("#decl-select");
     const view = this.lastView;
 
     switch (act) {
       case "lobby":
         this.onAction("lobby", {});
+        break;
+      case "rematch":
+        this.onAction("rematch", {});
         break;
       case "startGame":
         this.onAction("startGame", {});
@@ -728,14 +758,16 @@ export class GameUI {
         this.selected.clear();
         this.render(view, this._lastMeta);
         break;
-      case "confirm-single":
+      case "confirm-single": {
         if (sel.length !== 1) return alert("カードを1枚選んでください");
+        const declaration = btn?.getAttribute("data-decl") || "とり";
         this.onAction("declareSingle", {
           cardId: sel[0],
-          declaration: declEl?.value || "とり",
+          declaration,
         });
         this.selected.clear();
         break;
+      }
       case "confirm-pair":
         if (sel.length !== 2) return alert("カードを2枚選んでください");
         this.onAction("declarePair", { cardIdA: sel[0], cardIdB: sel[1] });
@@ -759,6 +791,10 @@ export class GameUI {
         this.selected.clear();
         this.onAction("skipDiscard", {});
         break;
+      case "skip-all-cook":
+        this.selected.clear();
+        this.onAction("skipAllCook", {});
+        break;
       case "skip-cook":
         this.selected.clear();
         this.onAction("skipCook", {});
@@ -773,15 +809,16 @@ export class GameUI {
   }
 
   _tickTimer() {
-    const el = this.root.querySelector(".timer");
-    if (!el) return;
-    const deadline = Number(el.getAttribute("data-deadline"));
-    const tick = () => {
-      const left = Math.max(0, Math.ceil((deadline - Date.now()) / 1000));
-      el.textContent = `のこり ${left} びょう`;
-      if (left > 0 && this.root.contains(el)) setTimeout(tick, 200);
-    };
-    tick();
+    const els = this.root.querySelectorAll(".timer[data-deadline]");
+    els.forEach((el) => {
+      const deadline = Number(el.getAttribute("data-deadline"));
+      const tick = () => {
+        const left = Math.max(0, Math.ceil((deadline - Date.now()) / 1000));
+        el.textContent = `のこり ${left} びょう`;
+        if (left > 0 && this.root.contains(el)) setTimeout(tick, 200);
+      };
+      tick();
+    });
   }
 }
 

@@ -57,7 +57,15 @@
             <input id="room-input" type="text" maxlength="8" placeholder="部屋コード" autocomplete="off" aria-label="部屋コード" />
             <button type="button" class="btn" id="btn-join">部屋に参加</button>
           </div>
-          <button type="button" class="btn" id="btn-solo">1人でプレイ（vs CPU）</button>
+          <div class="solo-row">
+            <label for="cpu-count" class="solo-row-label">CPU人数</label>
+            <select id="cpu-count" class="lobby-debug-select" aria-label="CPU人数">
+              <option value="1" selected>1</option>
+              <option value="2">2</option>
+              <option value="3">3</option>
+            </select>
+            <button type="button" class="btn" id="btn-solo">1人でプレイ（vs CPU）</button>
+          </div>
           <button type="button" class="btn ghost" id="btn-rules">ルールを見る</button>
         </div>
 

@@ -1,5 +1,5 @@
 /**
- * Simple CPU heuristics for solo vs CPU mode.
+ * Simple CPU heuristics for solo vs CPU mode (supports multiple CPUs).
  */
 
 import { SPECIAL_DRAW, HAND_LIMIT, isValidPair } from "./deck.js";
@@ -7,39 +7,42 @@ import { bestCooksFromHand } from "./helper.js";
 
 /**
  * Decide one CPU action from full game state.
- * @returns {{ type: string, payload?: object } | null}
+ * @returns {{ type: string, payload?: object, playerId: string } | null}
  */
 export function decideCpuAction(state) {
   if (!state || state.status !== "playing") return null;
 
-  const cpuIndex = state.players.findIndex((p) => p.isCpu);
-  if (cpuIndex < 0) return null;
-  const cpu = state.players[cpuIndex];
-
   if (state.phase === "cook_reveal") {
-    if (!(state.cookAcks || []).includes(cpu.id)) {
-      return { type: "ackCookReveal", payload: {} };
-    }
-    return null;
+    const cpu = state.players.find(
+      (p) => p.isCpu && !(state.cookAcks || []).includes(p.id)
+    );
+    if (!cpu) return null;
+    return { type: "ackCookReveal", payload: {}, playerId: cpu.id };
   }
 
   if (state.phase === "taste_window" && state.pendingAction) {
-    if (state.pendingAction.actorIndex === cpuIndex) return null;
+    const actor = state.pendingAction.actorIndex;
     const passes = state.pendingAction.tastePasses || [];
-    if (passes.includes(cpu.id)) return null;
-    return decideTaste(cpu);
+    const cpu = state.players.find(
+      (p, i) => p.isCpu && i !== actor && !passes.includes(p.id)
+    );
+    if (!cpu) return null;
+    const taste = decideTaste(cpu);
+    return { ...taste, playerId: cpu.id };
   }
 
-  if (state.turn !== cpuIndex) return null;
+  const cpuIndex = state.turn;
+  const cpu = state.players[cpuIndex];
+  if (!cpu?.isCpu) return null;
 
   if (state.phase === "discard_draw") {
-    return decideDiscardDraw(state, cpu);
+    return { ...decideDiscardDraw(state, cpu), playerId: cpu.id };
   }
   if (state.phase === "cook") {
-    return decideCook(state, cpu);
+    return { ...decideCook(state, cpu), playerId: cpu.id };
   }
   if (state.phase === "end_hand") {
-    return decideEndHand(cpu);
+    return { ...decideEndHand(cpu), playerId: cpu.id };
   }
   return null;
 }

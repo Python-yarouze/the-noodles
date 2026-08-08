@@ -775,6 +775,24 @@ body.in-game #global-status {
   border-bottom: 1px dashed #cdeedf;
 }
 
+.cook-preview-lines li.cook-line-boost {
+  color: #1a9a6e;
+  font-weight: 800;
+}
+
+.cook-preview-lines li.cook-line-boost strong {
+  color: #0d7a54;
+}
+
+.cook-preview-lines li.cook-line-cut {
+  color: #c4472a;
+  font-weight: 800;
+}
+
+.cook-preview-lines li.cook-line-cut strong {
+  color: #a33620;
+}
+
 .cook-preview-note {
   color: #c47b00;
   font-size: 0.82rem;
@@ -829,19 +847,24 @@ body.in-game #global-status {
 }
 
 .decl-label {
-  display: flex;
-  flex-direction: column;
-  gap: 0.3rem;
+  margin: 0;
   font-weight: 700;
   font-size: 0.9rem;
+  text-align: center;
 }
 
-.decl-label select {
-  padding: 0.55rem;
-  border-radius: 12px;
-  border: 2px solid #ffe0c8;
-  font: inherit;
-  background: #fff;
+.decl-btns {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  justify-content: center;
+  width: 100%;
+}
+
+.decl-btns .btn {
+  flex: 1 1 7.5rem;
+  min-height: 2.75rem;
+  font-weight: 800;
 }
 
 .hint {
@@ -909,6 +932,41 @@ body.in-game #global-status {
   gap: 0.5rem;
   justify-content: center;
   margin-top: 1.25rem;
+}
+
+.disconnect-banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem 0.75rem;
+  margin: 0 0 0.75rem;
+  padding: 0.65rem 0.85rem;
+  background: #fff3f0;
+  border: 2px solid #e07050;
+  border-radius: 12px;
+  color: #8a2f1a;
+  font-weight: 700;
+}
+
+.disconnect-banner p {
+  margin: 0;
+  flex: 1;
+  min-width: 10rem;
+}
+
+.solo-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.45rem 0.65rem;
+  width: 100%;
+}
+
+.solo-row-label {
+  font-weight: 700;
+  font-size: 0.9rem;
+  color: var(--ink);
 }
 
 .cook-history {
