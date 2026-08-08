@@ -5,11 +5,26 @@
 import { cardImagePath, WIN_SCORE, RULE_LABELS, categoryOf, RULES_IMAGE } from "./deck.js";
 import { explainScore, validateCookSet } from "./scoring.js";
 import { getCardEffect, effectsByCategory } from "./card-effects.js";
-import { FxLayer } from "./fx.js";
+import { FxLayer, showAppToast } from "./fx.js";
 import { suggestImprovements, topCombinations, bestCooksFromHand } from "./helper.js";
 
 const SEAT_COLORS = ["#c45c26", "#2a7a6a", "#b8860b", "#5c6bc0"];
 const RULES_IMG = RULES_IMAGE;
+
+const LOCKED_UI_ACTS = new Set([
+  "startGame",
+  "rematch",
+  "taste",
+  "skipTaste",
+  "ackCookReveal",
+  "confirm-single",
+  "confirm-pair",
+  "confirm-cook",
+  "confirm-end",
+  "skip-discard",
+  "skip-all-cook",
+  "skip-cook",
+]);
 
 const PHASE_JP = {
   draw: "ドロー",
@@ -39,7 +54,9 @@ export class GameUI {
   render(view, meta = {}) {
     this.lastView = view;
     this._lastMeta = meta;
-    const { connectionStatus = "", role = "", roomId = "", canStart = false } = meta;
+    const { connectionStatus = "", role = "", roomId = "", canStart = false, actionsLocked = false, canReconnect = false } =
+      meta;
+    const lock = actionsLocked ? "disabled" : "";
 
     document.body.classList.toggle("match-playing", view?.status === "playing");
     document.body.classList.toggle("match-finished", view?.status === "finished");
@@ -73,7 +90,7 @@ export class GameUI {
           </div>
           ${
             canStart
-              ? `<button type="button" class="btn primary big" data-act="startGame">はじめる</button>`
+              ? `<button type="button" class="btn primary big" data-act="startGame" ${lock}>はじめる</button>`
               : `<p class="hint">2〜4人になったらホストが「はじめる」を押してください</p>`
           }
           <div class="result-actions" style="margin-top:1rem">
@@ -89,10 +106,10 @@ export class GameUI {
     if (view.status === "finished") {
       const winner = view.players[view.winnerIndex];
       const goal = view.winScore ?? WIN_SCORE;
-      const canRematch = role === "host" || role === "solo" || role === "local";
+      const canRematch = role === "host" || role === "solo";
       this.root.innerHTML = `
         <div class="panel finished result-panel">
-          ${this._disconnectBanner(connectionStatus)}
+          ${this._disconnectBanner(connectionStatus, { role, canReconnect })}
           <h2>${escapeHtml(winner?.name || "？")} の勝利</h2>
           <p class="result-sub">${goal}点先取</p>
           ${this._resultScoreboard(view)}
@@ -100,7 +117,7 @@ export class GameUI {
           <div class="result-actions">
             ${
               canRematch
-                ? `<button type="button" class="btn primary" data-act="rematch">もう一度プレイ</button>`
+                ? `<button type="button" class="btn primary" data-act="rematch" ${lock}>もう一度プレイ</button>`
                 : `<p class="hint">ホストが再戦できます</p>`
             }
             <button type="button" class="btn ${canRematch ? "ghost" : "primary"}" data-act="lobby">ロビーへ</button>
@@ -134,7 +151,7 @@ export class GameUI {
 
     this.root.innerHTML = `
       <div class="table-shell table-playing">
-        ${this._disconnectBanner(connectionStatus)}
+        ${this._disconnectBanner(connectionStatus, { role, canReconnect })}
         ${this._turnBanner(view, myTurn, role, roomId)}
         <header class="table-header">
           <div class="brand">THE NOODLES</div>
@@ -186,8 +203,8 @@ export class GameUI {
               ? tastePassed
                 ? `<p class="hint big-hint">パス済み — 他の人の判断待ち（${passCount}/${passNeed}）</p>`
                 : `<div class="taste-actions">
-                  <button type="button" class="btn danger big taste-btn" data-act="taste">味見する</button>
-                  <button type="button" class="btn ghost" data-act="skipTaste">パス（味見しない）</button>
+                  <button type="button" class="btn danger big taste-btn" data-act="taste" ${lock}>味見する</button>
+                  <button type="button" class="btn ghost" data-act="skipTaste" ${lock}>パス（味見しない）</button>
                   <p class="hint">早いもの勝ち ／ パス ${passCount}/${passNeed}</p>
                 </div>`
               : ""
@@ -255,17 +272,31 @@ export class GameUI {
         ${
           acked
             ? `<p class="hint">確認済み — 他の人を待っています</p>`
-            : `<button type="button" class="btn primary big" data-act="ackCookReveal">確認して次へ</button>`
+            : `<button type="button" class="btn primary big" data-act="ackCookReveal" ${
+                this._lastMeta?.actionsLocked ? "disabled" : ""
+              }>確認して次へ</button>`
         }
       </div>`;
   }
 
-  _disconnectBanner(connectionStatus) {
+  _disconnectBanner(connectionStatus, opts = {}) {
     if (!connectionStatus) return "";
+    const { role = "", canReconnect = false } = opts;
+    const showReconnect = role === "guest" && canReconnect;
     return `
       <div class="disconnect-banner" role="alert">
-        <p>${escapeHtml(connectionStatus)}</p>
-        <button type="button" class="btn ghost" data-act="lobby">ホームへ</button>
+        <div class="disconnect-banner-text">
+          <p>${escapeHtml(connectionStatus)}</p>
+          <p class="disconnect-banner-note">ホストが閉じた部屋は再開できません</p>
+        </div>
+        <div class="disconnect-banner-actions">
+          ${
+            showReconnect
+              ? `<button type="button" class="btn primary" data-act="reconnect">再接続</button>`
+              : ""
+          }
+          <button type="button" class="btn ghost" data-act="lobby">ホームへ</button>
+        </div>
       </div>`;
   }
 
@@ -274,8 +305,6 @@ export class GameUI {
     const color = SEAT_COLORS[view.turn % 4];
     const phase = PHASE_JP[view.phase] || view.phase;
     const you = myTurn ? "（あなた）" : "";
-    const hot =
-      role === "local" ? `<span class="hot-tag">操作：${escapeHtml(cur?.name || "")}</span>` : "";
     const waitingCpu =
       role === "solo" && !myTurn && view.phase !== "taste_window" && view.phase !== "cook_reveal"
         ? `<span class="hot-tag">CPU…</span>`
@@ -294,7 +323,7 @@ export class GameUI {
           <button type="button" class="btn ghost btn-tool" data-act="open-rules">ルール</button>
           <button type="button" class="btn ghost btn-tool" data-act="open-ref">効果表</button>
         </div>
-        ${hot}${waitingCpu}
+        ${waitingCpu}
       </div>`;
   }
 
@@ -562,6 +591,7 @@ export class GameUI {
   }
 
   _actionControls(view, myTurn) {
+    const lock = this._lastMeta?.actionsLocked ? "disabled" : "";
     if (view.phase === "cook_reveal") {
       return `<p class="hint">上の完成料理を確認してください</p>`;
     }
@@ -576,14 +606,14 @@ export class GameUI {
       const n = this.selected.size;
       const blocked1 = view.usedDiscard1;
       const blocked2 = view.usedDiscard2;
-      const dis1 = blocked1 ? "disabled" : "";
+      const dis1 = blocked1 || this._lastMeta?.actionsLocked ? "disabled" : "";
       return `
         <div class="action-block stack">
           ${
             n === 0
               ? `
-            <button type="button" class="btn primary big" data-act="skip-discard">このまま料理へ →</button>
-            <button type="button" class="btn ghost" data-act="skip-all-cook">料理しない</button>`
+            <button type="button" class="btn primary big" data-act="skip-discard" ${lock}>このまま料理へ →</button>
+            <button type="button" class="btn ghost" data-act="skip-all-cook" ${lock}>料理しない</button>`
               : ""
           }
           ${
@@ -601,7 +631,9 @@ export class GameUI {
           ${
             n === 2
               ? `
-            <button type="button" class="btn danger big" data-act="confirm-pair" ${blocked2 ? "disabled" : ""}>
+            <button type="button" class="btn danger big" data-act="confirm-pair" ${
+              blocked2 || this._lastMeta?.actionsLocked ? "disabled" : ""
+            }>
               ペアとして伏せる（3枚引き）
             </button>
             ${blocked2 ? `<p class="hint">2枚捨ては使用済みです</p>` : ""}`
@@ -619,10 +651,12 @@ export class GameUI {
       const canCook = names.length >= 3 && validateCookSet(names, view.ruleSet).ok;
       return `
         <div class="action-block stack">
-          <button type="button" class="btn primary big" data-act="confirm-cook" ${canCook ? "" : "disabled"}>
+          <button type="button" class="btn primary big" data-act="confirm-cook" ${
+            canCook && !this._lastMeta?.actionsLocked ? "" : "disabled"
+          }>
             料理する
           </button>
-          <button type="button" class="btn ghost" data-act="skip-cook">料理しない</button>
+          <button type="button" class="btn ghost" data-act="skip-cook" ${lock}>料理しない</button>
         </div>`;
     }
 
@@ -633,7 +667,9 @@ export class GameUI {
       return `
         <div class="action-block stack">
           <p>手札を3枚にしてください（あと <strong>${need}</strong> 枚捨てる）</p>
-          <button type="button" class="btn primary big" data-act="confirm-end" ${ready ? "" : "disabled"}>
+          <button type="button" class="btn primary big" data-act="confirm-end" ${
+            ready && !this._lastMeta?.actionsLocked ? "" : "disabled"
+          }>
             捨ててターン終了
           </button>
         </div>`;
@@ -704,12 +740,17 @@ export class GameUI {
   }
 
   _handleAct(act, btn = null) {
+    if (LOCKED_UI_ACTS.has(act) && this._lastMeta?.actionsLocked) return;
+
     const sel = [...this.selected];
     const view = this.lastView;
 
     switch (act) {
       case "lobby":
         this.onAction("lobby", {});
+        break;
+      case "reconnect":
+        this.onAction("reconnect", {});
         break;
       case "rematch":
         this.onAction("rematch", {});
@@ -759,7 +800,7 @@ export class GameUI {
         this.render(view, this._lastMeta);
         break;
       case "confirm-single": {
-        if (sel.length !== 1) return alert("カードを1枚選んでください");
+        if (sel.length !== 1) return showAppToast("カードを1枚選んでください");
         const declaration = btn?.getAttribute("data-decl") || "とり";
         this.onAction("declareSingle", {
           cardId: sel[0],
@@ -769,7 +810,7 @@ export class GameUI {
         break;
       }
       case "confirm-pair":
-        if (sel.length !== 2) return alert("カードを2枚選んでください");
+        if (sel.length !== 2) return showAppToast("カードを2枚選んでください");
         this.onAction("declarePair", { cardIdA: sel[0], cardIdB: sel[1] });
         this.selected.clear();
         break;
@@ -778,7 +819,7 @@ export class GameUI {
         const byId = Object.fromEntries((me?.hand || []).map((c) => [c.id, c]));
         const names = sel.map((id) => byId[id]?.name).filter(Boolean);
         const v = validateCookSet(names, view.ruleSet);
-        if (!v.ok) return alert(v.reason);
+        if (!v.ok) return showAppToast(v.reason);
         this.onAction("cook", { cardIds: sel });
         this.selected.clear();
         break;

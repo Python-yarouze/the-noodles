@@ -42,9 +42,27 @@ body {
   padding: 0.5rem clamp(0.4rem, 2vw, 1rem) 1rem;
 }
 
+body.in-lobby {
+  min-height: 100dvh;
+  min-height: 100svh;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  overflow-x: hidden;
+  overflow-y: auto;
+  padding-top: 0.35rem;
+  padding-bottom: max(0.5rem, env(safe-area-inset-bottom));
+}
+
+body.in-lobby #lobby {
+  width: 100%;
+  max-width: 26rem;
+  margin: 0 auto;
+}
+
 .hero {
   max-width: 40rem;
-  margin: 1.75rem auto 1.25rem;
+  margin: 0 auto 0.85rem;
   text-align: center;
 }
 
@@ -96,7 +114,7 @@ body.in-game #global-status {
 .lobby-card {
   max-width: 26rem;
   margin: 0 auto;
-  padding: 1.4rem 1.35rem 1.5rem;
+  padding: 1.1rem 1.2rem 1.15rem;
   background: #fff;
   border-radius: var(--radius);
   box-shadow: 0 12px 0 rgba(255, 107, 107, 0.15), 0 18px 40px rgba(43, 42, 50, 0.08);
@@ -106,7 +124,7 @@ body.in-game #global-status {
 .lobby-card label,
 .lobby-card legend {
   display: block;
-  margin: 0.85rem 0 0.35rem;
+  margin: 0.55rem 0 0.3rem;
   color: var(--muted);
   font-size: 0.85rem;
   font-weight: 700;
@@ -129,7 +147,7 @@ body.in-game #global-status {
 }
 
 .lobby-details {
-  margin-top: 0.85rem;
+  margin-top: 0.55rem;
   border: 1px solid var(--line);
   border-radius: 8px;
   background: #fff;
@@ -195,39 +213,6 @@ body.in-game #global-status {
   white-space: nowrap;
 }
 
-.lobby-debug {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 0.35rem 0.5rem;
-  margin-top: 1.25rem;
-  padding-top: 0.75rem;
-  border-top: 1px dashed var(--line);
-  opacity: 0.72;
-}
-
-.lobby-debug-label {
-  margin: 0 !important;
-  font-size: 0.72rem !important;
-  font-weight: 600 !important;
-  color: var(--muted) !important;
-}
-
-.lobby-debug-select {
-  width: auto !important;
-  min-width: 4.5rem;
-  padding: 0.25rem 0.4rem !important;
-  font-size: 0.75rem !important;
-  border-radius: 6px !important;
-}
-
-.btn-debug {
-  padding: 0.3rem 0.55rem !important;
-  font-size: 0.72rem !important;
-  font-weight: 500 !important;
-  color: var(--muted) !important;
-}
-
 .radio-row {
   display: flex !important;
   align-items: center;
@@ -263,8 +248,8 @@ body.in-game #global-status {
 .btn-row {
   display: flex;
   flex-direction: column;
-  gap: 0.55rem;
-  margin-top: 1.2rem;
+  gap: 0.45rem;
+  margin-top: 0.85rem;
 }
 
 .btn {
@@ -320,13 +305,6 @@ body.in-game #global-status {
 .btn.big {
   font-size: 1.05rem;
   padding: 0.85rem 1.25rem;
-}
-
-.lobby-note {
-  margin-top: 1.1rem;
-  font-size: 0.78rem;
-  color: var(--muted);
-  line-height: 1.5;
 }
 
 .table-shell {
@@ -949,24 +927,60 @@ body.in-game #global-status {
   font-weight: 700;
 }
 
-.disconnect-banner p {
-  margin: 0;
+.disconnect-banner-text {
   flex: 1;
   min-width: 10rem;
 }
 
-.solo-row {
+.disconnect-banner p {
+  margin: 0;
+}
+
+.disconnect-banner-note {
+  margin-top: 0.25rem !important;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: #a05038;
+}
+
+.disconnect-banner-actions {
   display: flex;
   flex-wrap: wrap;
-  align-items: center;
-  gap: 0.45rem 0.65rem;
+  gap: 0.4rem;
+}
+
+.solo-row {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: stretch;
+  gap: 0.45rem;
   width: 100%;
 }
 
 .solo-row-label {
+  display: flex;
+  align-items: center;
+  flex: 0 0 auto;
   font-weight: 700;
-  font-size: 0.9rem;
+  font-size: 0.85rem;
   color: var(--ink);
+  white-space: nowrap;
+}
+
+.solo-row .solo-cpu-select {
+  flex: 0 0 auto;
+  width: auto;
+  min-width: 3.25rem;
+  align-self: stretch;
+  margin: 0;
+  padding: 0.35rem 0.45rem;
+  font-size: 0.9rem;
+}
+
+.solo-row #btn-solo {
+  flex: 1 1 auto;
+  min-width: 0;
+  white-space: nowrap;
 }
 
 .cook-history {
@@ -1814,7 +1828,7 @@ body.in-game #global-status {
   }
 
   body.in-lobby {
-    padding-bottom: 1rem;
+    padding: 0.15rem 0.35rem max(0.35rem, env(safe-area-inset-bottom));
   }
 
   body.in-game {
@@ -1837,26 +1851,48 @@ body.in-game #global-status {
   }
 
   .hero {
-    margin: 0.85rem auto 0.65rem;
+    margin: 0 auto 0.45rem;
   }
 
   .hero-title {
-    font-size: 2rem;
+    font-size: 1.75rem;
   }
 
   .hero-sub {
-    font-size: 0.88rem;
-    padding: 0 0.5rem;
+    font-size: 0.78rem;
+    padding: 0 0.35rem;
+    margin-top: 0.25rem;
   }
 
   .lobby-card {
-    padding: 1rem 0.85rem 1.1rem;
-    margin: 0 0.25rem;
+    padding: 0.75rem 0.7rem 0.8rem;
+    margin: 0;
+    box-shadow: 0 8px 0 rgba(255, 107, 107, 0.12), 0 12px 28px rgba(43, 42, 50, 0.06);
   }
 
-  .lobby-note {
-    font-size: 0.72rem;
-    margin-top: 0.85rem;
+  .lobby-card label,
+  .lobby-card legend {
+    margin: 0.35rem 0 0.2rem;
+    font-size: 0.78rem;
+  }
+
+  .lobby-details {
+    margin-top: 0.4rem;
+  }
+
+  .lobby-details summary {
+    padding: 0.5rem 0.65rem;
+    font-size: 0.85rem;
+  }
+
+  .btn-row {
+    gap: 0.35rem;
+    margin-top: 0.6rem;
+  }
+
+  .btn-row .btn {
+    padding: 0.55rem 0.75rem;
+    font-size: 0.92rem;
   }
 
   .table-playing {
@@ -2114,11 +2150,14 @@ body.in-game #global-status {
 
   .actions {
     flex-shrink: 0;
-    margin: 0.35rem 0 0.5rem;
-    position: static;
-    z-index: auto;
-    background: transparent;
-    padding-bottom: 0.25rem;
+    margin: 0.35rem 0 0;
+    position: sticky;
+    bottom: 0;
+    z-index: 25;
+    background: linear-gradient(180deg, rgba(255, 248, 240, 0.92), #fff8f0 35%);
+    border-top: 1px solid var(--line);
+    padding: 0.45rem 0.15rem max(0.55rem, env(safe-area-inset-bottom));
+    box-shadow: 0 -6px 16px rgba(80, 40, 20, 0.06);
   }
 
   .action-block .btn {

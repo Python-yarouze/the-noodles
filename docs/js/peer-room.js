@@ -56,8 +56,21 @@ export class PeerRoom {
     this.peer = null;
     /** @type {Map<string, any>} peerId -> DataConnection */
     this.conns = new Map();
+    /** Peer ids reserved at connection event (before open). */
+    this.pendingPeers = new Set();
     this.conn = null; // guest single connection
     this.connected = false;
+  }
+
+  _slotCount() {
+    return this.conns.size + this.pendingPeers.size;
+  }
+
+  _releasePeer(peerId) {
+    if (!peerId) return;
+    this.pendingPeers.delete(peerId);
+    this.conns.delete(peerId);
+    this.connected = this.conns.size > 0;
   }
 
   async connect() {
@@ -114,15 +127,20 @@ export class PeerRoom {
 
       this.peer.on("connection", (conn) => {
         if (this.role !== "host") return;
-        if (this.conns.size >= this.maxGuests) {
+        if (this._slotCount() >= this.maxGuests) {
           conn.on("open", () => {
-            conn.send({ type: "error", reason: "部屋が満員です（最大4人）" });
+            try {
+              conn.send({ type: "error", reason: "部屋が満員です（最大4人）" });
+            } catch (_) {
+              /* ignore */
+            }
             conn.close();
           });
           return;
         }
+        if (conn.peer) this.pendingPeers.add(conn.peer);
         this._bindHostConn(conn);
-        this.onStatus(`ゲスト接続 ${this.conns.size}/${this.maxGuests}`);
+        this.onStatus(`ゲスト接続 ${this._slotCount()}/${this.maxGuests}`);
       });
 
       this.peer.on("error", (err) => {
@@ -143,6 +161,7 @@ export class PeerRoom {
 
   _bindHostConn(conn) {
     conn.on("open", () => {
+      if (conn.peer) this.pendingPeers.delete(conn.peer);
       this.conns.set(conn.peer, conn);
       this.connected = this.conns.size > 0;
       this.onStatus(`接続中 ${this.conns.size} 人`);
@@ -156,12 +175,11 @@ export class PeerRoom {
       }
     });
     conn.on("close", () => {
-      this.conns.delete(conn.peer);
-      this.connected = this.conns.size > 0;
+      this._releasePeer(conn.peer);
       this.onStatus(`切断（残り接続 ${this.conns.size}）`);
     });
     conn.on("error", () => {
-      this.conns.delete(conn.peer);
+      this._releasePeer(conn.peer);
     });
   }
 
@@ -180,7 +198,7 @@ export class PeerRoom {
     });
     conn.on("close", () => {
       this.connected = false;
-      this.onStatus("ホストとの接続が切れました");
+      this.onStatus("ホストとの接続が切れました。ホストが閉じた部屋は再開できません");
     });
     conn.on("error", (err) => {
       this.onStatus(`接続エラー: ${err.message || err}`);
@@ -227,6 +245,7 @@ export class PeerRoom {
     try {
       for (const c of this.conns.values()) c.close();
       this.conns.clear();
+      this.pendingPeers.clear();
       if (this.conn) this.conn.close();
       if (this.peer) this.peer.destroy();
     } catch (_) {

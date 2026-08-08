@@ -1,17 +1,36 @@
 /**
- * App entry: lobby + host/guest / solo CPU / local hot-seat (debug).
+ * App entry: lobby + host/guest / solo CPU.
  */
 
 import { NoodlesGame } from "./game.js";
 import { PeerRoom } from "./peer-room.js";
 import { GameUI } from "./ui.js";
 import { decideCpuAction } from "./ai.js";
+import { showAppToast } from "./fx.js";
 import { MAX_PLAYERS, clampWinScore, clampTasteMs } from "./deck.js";
 
 const lobbyEl = document.getElementById("lobby");
 const tableEl = document.getElementById("table");
 const statusEl = document.getElementById("global-status");
 const lobbyRulesModal = document.getElementById("lobby-rules-modal");
+
+const LOBBY_BTNS = ["btn-host", "btn-join", "btn-solo"];
+
+/** Actions that must not be double-fired while in flight. */
+const LOCKED_ACTIONS = new Set([
+  "startGame",
+  "rematch",
+  "declareSingle",
+  "declarePair",
+  "taste",
+  "skipTaste",
+  "skipDiscard",
+  "skipAllCook",
+  "cook",
+  "skipCook",
+  "ackCookReveal",
+  "endTurnDiscard",
+]);
 
 let game = null;
 let room = null;
@@ -20,11 +39,12 @@ let role = null;
 let myId = null;
 let roomId = null;
 let connectionStatus = "";
-let localActiveSeat = 0;
 /** @type {Map<string, string>} peerId -> playerId for host routing */
 let peerToPlayer = new Map();
 let cpuTimer = null;
 let cpuBusy = false;
+let lobbyBusy = false;
+let actionBusy = false;
 
 function seatStorageKey(id) {
   return `noodles:seat:${id}`;
@@ -61,6 +81,25 @@ function clearSeat(id) {
   }
 }
 
+function setLobbyBusy(busy) {
+  lobbyBusy = busy;
+  for (const id of LOBBY_BTNS) {
+    const el = document.getElementById(id);
+    if (el) el.disabled = busy;
+  }
+}
+
+function destroyRoomOnly() {
+  if (room) {
+    try {
+      room.destroy();
+    } catch (_) {
+      /* ignore */
+    }
+    room = null;
+  }
+}
+
 function showLobby(opts = {}) {
   const clearSeatOnLeave = opts.clearSeat !== false;
   if (clearSeatOnLeave && roomId) clearSeat(roomId);
@@ -70,6 +109,7 @@ function showLobby(opts = {}) {
   tableEl.innerHTML = "";
   document.body.classList.remove("in-game", "match-playing", "match-finished");
   document.body.classList.add("in-lobby");
+  setLobbyBusy(false);
   syncGlobalStatus();
 }
 
@@ -85,10 +125,7 @@ function showTable() {
 
 function destroySession() {
   clearCpuTimer();
-  if (room) {
-    room.destroy();
-    room = null;
-  }
+  destroyRoomOnly();
   game = null;
   ui = null;
   role = null;
@@ -96,6 +133,7 @@ function destroySession() {
   roomId = null;
   peerToPlayer = new Map();
   cpuBusy = false;
+  actionBusy = false;
   window.__lastGuestView = null;
 }
 
@@ -132,11 +170,6 @@ function selectedRuleSet() {
   return el?.value === "classic" ? "classic" : "noodles";
 }
 
-function localPlayerCount() {
-  const n = Number(document.getElementById("local-count")?.value || 2);
-  return Math.min(MAX_PLAYERS, Math.max(2, n));
-}
-
 function soloCpuCount() {
   const n = Number(document.getElementById("cpu-count")?.value || 1);
   return Math.min(MAX_PLAYERS - 1, Math.max(1, n));
@@ -158,14 +191,11 @@ function applyLobbySettings(g) {
 
 function bindGameChange() {
   if (!game) return;
-  if (role === "local") {
-    game.onChange = () => {
-      syncLocalSeat();
-      refresh();
-    };
-  } else {
-    game.onChange = () => refresh();
-  }
+  game.onChange = () => refresh();
+}
+
+function canGuestReconnect() {
+  return role === "guest" && !!roomId && !!loadSeat(roomId);
 }
 
 function refresh() {
@@ -175,6 +205,8 @@ function refresh() {
     role,
     roomId,
     isHost: role === "host",
+    actionsLocked: actionBusy,
+    canReconnect: canGuestReconnect(),
     canStart:
       role === "host" &&
       game &&
@@ -188,13 +220,6 @@ function refresh() {
     const view = game.viewFor("local-0");
     ui.render(view, meta);
     scheduleCpu();
-    return;
-  }
-
-  if (role === "local" && game) {
-    syncLocalSeat();
-    const view = game.viewFor(game.state.players[localActiveSeat].id);
-    ui.render(view, meta);
     return;
   }
 
@@ -231,36 +256,14 @@ function runCpuStep() {
 
   cpuBusy = true;
   try {
-    handleHostAction(action.playerId, action.type, action.payload || {}, { skipRefresh: true });
+    handleHostAction(action.playerId, action.type, action.payload || {}, {
+      skipRefresh: true,
+      skipActionLock: true,
+    });
   } finally {
     cpuBusy = false;
   }
   refresh();
-}
-
-function syncLocalSeat() {
-  if (!game || game.state.status !== "playing") return;
-  if (game.state.phase === "taste_window" && game.state.pendingAction) {
-    const actor = game.state.pendingAction.actorIndex;
-    const passes = game.state.pendingAction.tastePasses || [];
-    const n = game.state.players.length;
-    // Prefer an opponent who has not yet passed (and is not actor).
-    for (let step = 1; step < n; step++) {
-      const i = (actor + step) % n;
-      const p = game.state.players[i];
-      if (!passes.includes(p.id)) {
-        localActiveSeat = i;
-        return;
-      }
-    }
-    localActiveSeat = (actor + 1) % n;
-  } else if (game.state.phase === "cook_reveal") {
-    const acks = game.state.cookAcks || [];
-    const waiting = game.state.players.findIndex((p) => !acks.includes(p.id));
-    if (waiting >= 0) localActiveSeat = waiting;
-  } else {
-    localActiveSeat = game.state.turn;
-  }
 }
 
 function broadcastViews() {
@@ -284,69 +287,77 @@ function sendJoined(peerId, playerId) {
   room.sendToPeer(peerId, { type: "state", view: game.viewFor(playerId) });
 }
 
-function handleHostAction(playerId, type, payload, { skipRefresh = false } = {}) {
-  if (!game) return;
-  let result = { ok: false, reason: "unknown" };
-  switch (type) {
-    case "startGame":
-      result = game.startGame();
-      if (result.ok) {
-        connectionStatus = "";
-        syncGlobalStatus();
-      }
-      break;
-    case "setRuleSet":
-      result = game.setRuleSet(payload.ruleSet);
-      break;
-    case "setSettings":
-      result = game.setSettings(payload);
-      break;
-    case "declareSingle":
-      result = game.declareSingleDiscard(playerId, payload.cardId, payload.declaration);
-      break;
-    case "declarePair":
-      result = game.declarePairDiscard(playerId, payload.cardIdA, payload.cardIdB);
-      break;
-    case "taste":
-      result = game.taste(playerId);
-      break;
-    case "skipTaste":
-      result = game.skipTaste(playerId);
-      break;
-    case "skipDiscard":
-      result = game.skipDiscardPhase(playerId);
-      break;
-    case "cook":
-      result = game.cook(playerId, payload.cardIds);
-      break;
-    case "ackCookReveal":
-      result = game.ackCookReveal(playerId);
-      break;
-    case "skipAllCook": {
-      result = game.skipDiscardPhase(playerId);
-      if (result.ok) result = game.skipCook(playerId);
-      break;
-    }
-    case "skipCook":
-      result = game.skipCook(playerId);
-      break;
-    case "endTurnDiscard":
-      result = game.endTurnDiscard(playerId, payload.cardIds);
-      break;
-    default:
-      break;
+function handleHostAction(playerId, type, payload, { skipRefresh = false, skipActionLock = false } = {}) {
+  if (!game) return { ok: false, reason: "no game" };
+  const useLock = !skipActionLock && LOCKED_ACTIONS.has(type);
+  if (useLock) {
+    if (actionBusy) return { ok: false, reason: "" };
+    actionBusy = true;
   }
-  if (!result.ok && result.reason) {
+
+  let result = { ok: false, reason: "unknown" };
+  try {
+    switch (type) {
+      case "startGame":
+        result = game.startGame();
+        if (result.ok) {
+          connectionStatus = "";
+          syncGlobalStatus();
+        }
+        break;
+      case "setRuleSet":
+        result = game.setRuleSet(payload.ruleSet);
+        break;
+      case "setSettings":
+        result = game.setSettings(payload);
+        break;
+      case "declareSingle":
+        result = game.declareSingleDiscard(playerId, payload.cardId, payload.declaration);
+        break;
+      case "declarePair":
+        result = game.declarePairDiscard(playerId, payload.cardIdA, payload.cardIdB);
+        break;
+      case "taste":
+        result = game.taste(playerId);
+        break;
+      case "skipTaste":
+        result = game.skipTaste(playerId);
+        break;
+      case "skipDiscard":
+        result = game.skipDiscardPhase(playerId);
+        break;
+      case "cook":
+        result = game.cook(playerId, payload.cardIds);
+        break;
+      case "ackCookReveal":
+        result = game.ackCookReveal(playerId);
+        break;
+      case "skipAllCook": {
+        result = game.skipDiscardPhase(playerId);
+        if (result.ok) result = game.skipCook(playerId);
+        break;
+      }
+      case "skipCook":
+        result = game.skipCook(playerId);
+        break;
+      case "endTurnDiscard":
+        result = game.endTurnDiscard(playerId, payload.cardIds);
+        break;
+      default:
+        break;
+    }
+    if (!result.ok && result.reason) {
     const isHuman =
-      playerId === myId ||
-      role === "local" ||
-      (role === "solo" && playerId === "local-0");
-    if (isHuman) alert(result.reason);
-    else if (role === "host") {
-      for (const [peerId, pid] of peerToPlayer) {
-        if (pid === playerId) room?.sendToPeer(peerId, { type: "error", reason: result.reason });
+      playerId === myId || (role === "solo" && playerId === "local-0");
+    if (isHuman) showAppToast(result.reason);
+      else if (role === "host") {
+        for (const [peerId, pid] of peerToPlayer) {
+          if (pid === playerId) room?.sendToPeer(peerId, { type: "error", reason: result.reason });
+        }
       }
     }
+  } finally {
+    if (useLock) actionBusy = false;
   }
   if (!skipRefresh) refresh();
   return result;
@@ -354,33 +365,38 @@ function handleHostAction(playerId, type, payload, { skipRefresh = false } = {})
 
 function rematch() {
   if (!game) return;
-  if (role !== "host" && role !== "solo" && role !== "local") return;
+  if (role !== "host" && role !== "solo") return;
+  if (actionBusy) return;
+  actionBusy = true;
 
-  const players = game.state.players.map((p) => ({
-    id: p.id,
-    name: p.name,
-    isCpu: !!p.isCpu,
-  }));
-  const ruleSet = game.state.ruleSet;
-  const winScore = game.state.winScore;
-  const tasteWindowMs = game.state.tasteWindowMs;
+  try {
+    const players = game.state.players.map((p) => ({
+      id: p.id,
+      name: p.name,
+      isCpu: !!p.isCpu,
+    }));
+    const ruleSet = game.state.ruleSet;
+    const winScore = game.state.winScore;
+    const tasteWindowMs = game.state.tasteWindowMs;
 
-  clearCpuTimer();
-  cpuBusy = false;
-  game = new NoodlesGame();
-  game.setRuleSet(ruleSet);
-  game.setSettings({ winScore, tasteWindowMs });
-  bindGameChange();
-  for (const p of players) {
-    game.addPlayer(p.id, p.name, { isCpu: p.isCpu });
+    clearCpuTimer();
+    cpuBusy = false;
+    game = new NoodlesGame();
+    game.setRuleSet(ruleSet);
+    game.setSettings({ winScore, tasteWindowMs });
+    bindGameChange();
+    for (const p of players) {
+      game.addPlayer(p.id, p.name, { isCpu: p.isCpu });
+    }
+    const started = game.startGame();
+    if (!started.ok) {
+      showAppToast(started.reason || "再戦を開始できませんでした");
+    } else {
+      connectionStatus = "";
+    }
+  } finally {
+    actionBusy = false;
   }
-  const started = game.startGame();
-  if (!started.ok) {
-    alert(started.reason || "再戦を開始できませんでした");
-    return;
-  }
-  connectionStatus = "";
-  if (role === "local") localActiveSeat = 0;
   refresh();
 }
 
@@ -390,25 +406,34 @@ function handleUiAction(type, payload) {
     return;
   }
 
+  if (type === "reconnect") {
+    reconnectGuest();
+    return;
+  }
+
   if (type === "rematch") {
     if (role === "guest") return;
     rematch();
     return;
   }
 
+  if (LOCKED_ACTIONS.has(type) && actionBusy) return;
+
   if (role === "guest") {
-    room?.send({ type: "action", action: type, payload, playerId: myId });
+    if (LOCKED_ACTIONS.has(type)) {
+      actionBusy = true;
+      refresh();
+    }
+    const sent = room?.send({ type: "action", action: type, payload, playerId: myId });
+    if (!sent) {
+      actionBusy = false;
+      setStatus("送信できません。再接続してください");
+    }
     return;
   }
 
   if (role === "solo") {
     handleHostAction("local-0", type, payload);
-    return;
-  }
-
-  if (role === "local") {
-    const pid = game.state.players[localActiveSeat].id;
-    handleHostAction(pid, type, payload);
     return;
   }
 
@@ -420,6 +445,14 @@ function handleUiAction(type, payload) {
 function onPeerMessage(msg, meta = {}) {
   if (role === "host") {
     if (msg.type === "join" || msg.type === "rejoin") {
+      // One PeerJS connection = one seat (ignore join spam with new ids).
+      if (meta.peerId && peerToPlayer.has(meta.peerId)) {
+        const seatedId = peerToPlayer.get(meta.peerId);
+        sendJoined(meta.peerId, seatedId);
+        refresh();
+        return;
+      }
+
       const existing = game.state.players.some((p) => p.id === msg.playerId);
       if (existing) {
         if (meta.peerId) peerToPlayer.set(meta.peerId, msg.playerId);
@@ -428,7 +461,6 @@ function onPeerMessage(msg, meta = {}) {
         return;
       }
       if (msg.type === "rejoin") {
-        // Unknown seat mid-game: cannot invent a player
         if (game.state.status !== "waiting") {
           if (meta.peerId) {
             room.sendToPeer(meta.peerId, {
@@ -452,7 +484,9 @@ function onPeerMessage(msg, meta = {}) {
     }
     if (msg.type === "action") {
       const pid = msg.playerId || peerToPlayer.get(meta.peerId);
-      handleHostAction(pid, msg.action, msg.payload || {});
+      // Prefer mapped seat over spoofed playerId from a known peer.
+      const mapped = meta.peerId ? peerToPlayer.get(meta.peerId) : null;
+      handleHostAction(mapped || pid, msg.action, msg.payload || {});
       return;
     }
   }
@@ -460,6 +494,7 @@ function onPeerMessage(msg, meta = {}) {
   if (role === "guest") {
     if (msg.type === "state") {
       window.__lastGuestView = msg.view;
+      actionBusy = false;
       if (msg.view?.status === "playing" || msg.view?.status === "finished") {
         connectionStatus = "";
         syncGlobalStatus();
@@ -468,7 +503,9 @@ function onPeerMessage(msg, meta = {}) {
       return;
     }
     if (msg.type === "error") {
-      alert(msg.reason || "エラー");
+      actionBusy = false;
+      showAppToast(msg.reason || "エラー");
+      refresh();
       return;
     }
     if (msg.type === "joined") {
@@ -483,6 +520,10 @@ function onPeerMessage(msg, meta = {}) {
 }
 
 async function startHost() {
+  if (lobbyBusy) return;
+  setLobbyBusy(true);
+  destroyRoomOnly();
+
   const name = document.getElementById("name-input").value.trim() || "ホスト";
   role = "host";
   myId = `host-${Math.random().toString(36).slice(2, 8)}`;
@@ -490,6 +531,8 @@ async function startHost() {
   applyLobbySettings(game);
   bindGameChange();
   game.addPlayer(myId, name);
+  peerToPlayer = new Map();
+  actionBusy = false;
 
   room = new PeerRoom({
     role: "host",
@@ -504,24 +547,33 @@ async function startHost() {
     setStatus(`部屋 ${roomId} — 2〜4人そろったら「はじめる」`);
   } catch (e) {
     console.error(e);
-    alert("部屋の作成に失敗しました");
+    showAppToast("部屋の作成に失敗しました");
     showLobby({ clearSeat: false });
+  } finally {
+    setLobbyBusy(false);
   }
 }
 
 async function startGuest() {
+  if (lobbyBusy) return;
   const name = document.getElementById("name-input").value.trim() || "ゲスト";
   const code = document.getElementById("room-input").value.trim().toUpperCase();
   if (!code) {
-    alert("部屋コードを入力してください");
+    showAppToast("部屋コードを入力してください");
     return;
   }
+
+  setLobbyBusy(true);
+  destroyRoomOnly();
+
   role = "guest";
   roomId = code;
   const saved = loadSeat(code);
   myId = saved?.playerId || `guest-${Math.random().toString(36).slice(2, 8)}`;
   const joinName = saved?.name || name;
   const isRejoin = !!saved?.playerId;
+  actionBusy = false;
+  window.__lastGuestView = null;
 
   room = new PeerRoom({
     role: "guest",
@@ -534,58 +586,97 @@ async function startGuest() {
     await room.connect();
     showTable();
     saveSeat(code, myId, joinName);
-    room.send({
+    const sent = room.send({
       type: isRejoin ? "rejoin" : "join",
       playerId: myId,
       name: joinName,
     });
-    setStatus(
-      isRejoin ? "再接続リクエストを送信したよ" : "ホストに参加リクエストを送信したよ"
-    );
+    if (!sent) {
+      setStatus("送信できません。再接続してください");
+    } else {
+      setStatus(
+        isRejoin ? "再接続リクエストを送信したよ" : "ホストに参加リクエストを送信したよ"
+      );
+    }
   } catch (e) {
     console.error(e);
-    alert("部屋への接続に失敗しました");
+    showAppToast("部屋への接続に失敗しました");
     showLobby({ clearSeat: false });
+  } finally {
+    setLobbyBusy(false);
+  }
+}
+
+async function reconnectGuest() {
+  if (role !== "guest" || !roomId || lobbyBusy) return;
+  const code = roomId;
+  const saved = loadSeat(code);
+  if (!saved?.playerId) {
+    showAppToast("席情報がないため再接続できません");
+    return;
+  }
+
+  setLobbyBusy(true);
+  actionBusy = false;
+  destroyRoomOnly();
+  myId = saved.playerId;
+  const joinName = saved.name || "ゲスト";
+
+  room = new PeerRoom({
+    role: "guest",
+    roomId: code,
+    onMessage: onPeerMessage,
+    onStatus: setStatus,
+  });
+
+  try {
+    await room.connect();
+    const sent = room.send({
+      type: "rejoin",
+      playerId: myId,
+      name: joinName,
+    });
+    if (!sent) {
+      setStatus("送信できません。再接続してください");
+    } else {
+      connectionStatus = "";
+      setStatus("再接続しました。同期待ち…");
+    }
+  } catch (e) {
+    console.error(e);
+    setStatus("再接続に失敗しました。ホストが閉じた部屋は再開できません");
+  } finally {
+    setLobbyBusy(false);
+    refresh();
   }
 }
 
 function startSolo() {
-  const name = document.getElementById("name-input").value.trim() || "プレイヤー";
-  const cpuN = soloCpuCount();
-  role = "solo";
-  myId = "local-0";
-  roomId = "SOLO";
-  game = new NoodlesGame();
-  applyLobbySettings(game);
-  bindGameChange();
-  game.addPlayer("local-0", name);
-  for (let i = 0; i < cpuN; i++) {
-    const label = i === 0 ? "CPU" : `CPU${i + 1}`;
-    game.addPlayer(`cpu-${i}`, label, { isCpu: true });
+  if (lobbyBusy) return;
+  setLobbyBusy(true);
+  try {
+    destroyRoomOnly();
+    const name = document.getElementById("name-input").value.trim() || "プレイヤー";
+    const cpuN = soloCpuCount();
+    role = "solo";
+    myId = "local-0";
+    roomId = "SOLO";
+    actionBusy = false;
+    game = new NoodlesGame();
+    applyLobbySettings(game);
+    bindGameChange();
+    game.addPlayer("local-0", name);
+    for (let i = 0; i < cpuN; i++) {
+      const label = i === 0 ? "CPU" : `CPU${i + 1}`;
+      game.addPlayer(`cpu-${i}`, label, { isCpu: true });
+    }
+    game.startGame();
+    connectionStatus = "";
+    showTable();
+    refresh();
+  } finally {
+    setLobbyBusy(false);
   }
-  game.startGame();
-  connectionStatus = "";
-  showTable();
-  refresh();
-}
-
-function startLocal() {
-  const name1 = document.getElementById("name-input").value.trim() || "プレイヤー1";
-  const count = localPlayerCount();
-  role = "local";
-  roomId = "LOCAL";
-  game = new NoodlesGame();
-  applyLobbySettings(game);
-  bindGameChange();
-  game.addPlayer("local-0", name1);
-  for (let i = 1; i < count; i++) {
-    game.addPlayer(`local-${i}`, `プレイヤー${i + 1}`);
-  }
-  game.startGame();
-  localActiveSeat = 0;
-  connectionStatus = "";
-  showTable();
-  refresh();
 }
 
 function openLobbyRules() {
@@ -599,7 +690,6 @@ function closeLobbyRules() {
 document.getElementById("btn-host")?.addEventListener("click", startHost);
 document.getElementById("btn-join")?.addEventListener("click", startGuest);
 document.getElementById("btn-solo")?.addEventListener("click", startSolo);
-document.getElementById("btn-local")?.addEventListener("click", startLocal);
 document.getElementById("btn-rules")?.addEventListener("click", openLobbyRules);
 document.getElementById("btn-close-lobby-rules")?.addEventListener("click", closeLobbyRules);
 lobbyRulesModal?.addEventListener("click", (e) => {

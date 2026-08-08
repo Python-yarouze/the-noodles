@@ -4,6 +4,22 @@
 
 const SEAT_COLORS = ["#c45c26", "#2a7a6a", "#b8860b", "#5c6bc0"];
 
+/** Toast usable from lobby or table (body-mounted). */
+export function showAppToast(text, cls = "fx-toast-go") {
+  let layer = document.querySelector(".fx-layer.app-toast-host");
+  if (!layer) {
+    layer = document.createElement("div");
+    layer.className = "fx-layer app-toast-host";
+    layer.setAttribute("aria-hidden", "true");
+    document.body.appendChild(layer);
+  }
+  const el = document.createElement("div");
+  el.className = `fx-toast ${cls || ""}`;
+  el.textContent = String(text ?? "");
+  layer.appendChild(el);
+  setTimeout(() => el.remove(), 2000);
+}
+
 export class FxLayer {
   constructor(root) {
     this.root = root;
@@ -112,11 +128,7 @@ export class FxLayer {
   }
 
   _toast(text, cls) {
-    const el = document.createElement("div");
-    el.className = `fx-toast ${cls || ""}`;
-    el.textContent = text;
-    this.layer.appendChild(el);
-    setTimeout(() => el.remove(), 1600);
+    showAppToast(text, cls);
   }
 
   _splash(text, cls) {

@@ -47,7 +47,7 @@
             <input id="win-score" type="number" min="20" max="100" step="5" value="50" />
             <label for="taste-sec">味見の制限時間（秒・0＝制限なし）</label>
             <input id="taste-sec" type="number" min="0" max="60" step="1" value="15" />
-            <p class="settings-hint">ホスト／同じPC開始時に反映。デフォルトは50点・15秒。0で制限なし。</p>
+            <p class="settings-hint">ホスト／ソロ開始時に反映。デフォルトは50点・15秒。0で制限なし。</p>
           </fieldset>
         </details>
 
@@ -58,30 +58,15 @@
             <button type="button" class="btn" id="btn-join">部屋に参加</button>
           </div>
           <div class="solo-row">
-            <label for="cpu-count" class="solo-row-label">CPU人数</label>
-            <select id="cpu-count" class="lobby-debug-select" aria-label="CPU人数">
+            <label for="cpu-count" class="solo-row-label">CPU</label>
+            <select id="cpu-count" class="solo-cpu-select" aria-label="CPU人数">
               <option value="1" selected>1</option>
               <option value="2">2</option>
               <option value="3">3</option>
             </select>
-            <button type="button" class="btn" id="btn-solo">1人でプレイ（vs CPU）</button>
+            <button type="button" class="btn" id="btn-solo">1人でプレイ</button>
           </div>
           <button type="button" class="btn ghost" id="btn-rules">ルールを見る</button>
-        </div>
-
-        <p class="lobby-note">
-          2〜4人まで。ホストのブラウザが進行を管理します。カード選択後にアクション。味見は早いもの勝ち（パスは個人単位）。
-          対戦中は「お助け」で手札の組み合わせと改善案を確認できます。
-        </p>
-
-        <div class="lobby-debug">
-          <label for="local-count" class="lobby-debug-label">同じPC人数</label>
-          <select id="local-count" class="lobby-debug-select">
-            <option value="2">2人</option>
-            <option value="3">3人</option>
-            <option value="4">4人</option>
-          </select>
-          <button type="button" class="btn ghost btn-debug" id="btn-local">同じPC（デバッグ）</button>
         </div>
       </div>
     </main>
