@@ -96,7 +96,6 @@ export class FxLayer {
       case "cook":
       case "cook_win":
         this._cook(event);
-        if (event.type === "cook_win") this._confetti();
         break;
       case "cook_ack":
         this._toast(
@@ -178,25 +177,59 @@ export class FxLayer {
   }
 
   _cook(event) {
+    const points = Number(event.points) || 0;
+    const isWin = event.type === "cook_win";
+    let tier = "t2";
+    if (isWin) tier = "win";
+    else if (points <= 10) tier = "t1";
+    else if (points <= 20) tier = "t2";
+    else if (points <= 30) tier = "t3";
+    else tier = "t4";
+
+    if (tier === "t1") {
+      this._toast(
+        `${event.playerName ? `${event.playerName} ` : ""}料理 +${points}点`.trim(),
+        "fx-toast-draw"
+      );
+      this._splash(`+${points}`, "fx-start");
+      return;
+    }
+
     const el = document.createElement("div");
-    el.className = "fx-cook";
+    el.className = `fx-cook fx-cook--${tier}`;
     const names = (event.names || []).map((n) => escapeHtml(n)).join("・");
     const chef = event.playerName ? `<p class="fx-cook-chef">${escapeHtml(event.playerName)}</p>` : "";
+    const title = isWin ? "勝利料理！" : "料理完成";
+    const burstCount = tier === "t3" ? 10 : tier === "t4" || tier === "win" ? 18 : 0;
+    const burst =
+      burstCount > 0
+        ? `<div class="fx-cook-burst">${Array.from({ length: burstCount }, (_, i) => {
+            const ang = (Math.PI * 2 * i) / burstCount;
+            const dist = 70 + (i % 3) * 28;
+            return `<i style="--i:${i};--dx:${Math.cos(ang) * dist}px;--dy:${Math.sin(ang) * dist}px"></i>`;
+          }).join("")}</div>`
+        : "";
     el.innerHTML = `
+      ${burst}
       <div class="fx-cook-inner">
-        <p class="fx-cook-title">料理完成</p>
+        <p class="fx-cook-title">${title}</p>
         ${chef}
         <p class="fx-cook-names">${names}</p>
-        <p class="fx-cook-points">+${event.points ?? 0}<small>点</small></p>
+        <p class="fx-cook-points">+${points}<small>点</small></p>
       </div>`;
     this.layer.appendChild(el);
-    setTimeout(() => el.remove(), 2200);
+    const ttl = tier === "t3" ? 2300 : tier === "t4" || tier === "win" ? 2800 : 2200;
+    setTimeout(() => el.remove(), ttl);
+
+    if (tier === "t4") this._confetti(42);
+    if (tier === "win") this._confetti(64);
   }
 
-  _confetti() {
+  _confetti(count = 28) {
     const wrap = document.createElement("div");
     wrap.className = "fx-confetti";
-    for (let i = 0; i < 28; i++) {
+    const n = Math.max(8, count | 0);
+    for (let i = 0; i < n; i++) {
       const p = document.createElement("i");
       p.style.setProperty("--i", String(i));
       p.style.setProperty("--x", `${Math.random() * 100}%`);

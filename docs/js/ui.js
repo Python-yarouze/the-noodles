@@ -49,6 +49,8 @@ export class GameUI {
     this.fx = new FxLayer(root);
     this._lastPhase = null;
     this.showHelper = false;
+    this.helperTab = "cooks";
+    this.refTab = null;
   }
 
   render(view, meta = {}) {
@@ -70,6 +72,9 @@ export class GameUI {
       const goal = view?.winScore ?? WIN_SCORE;
       const tasteMs = view?.tasteWindowMs ?? 15000;
       const tasteLabel = tasteMs ? `味見 ${Math.round(tasteMs / 1000)}秒` : "味見 制限なし";
+      const target = view?.targetSeats ?? meta.targetSeats ?? 4;
+      const have = (view?.players || []).length;
+      document.body.style.removeProperty("--turn-seat");
       this.root.innerHTML = `
         <div class="panel waiting">
           <p class="status-line">${escapeHtml(connectionStatus || "参加者を待っています…")}</p>
@@ -84,6 +89,7 @@ export class GameUI {
           </div>
           <p class="mode-badge">${escapeHtml(RULE_LABELS[view?.ruleSet] || "")}</p>
           <p class="hint">目標 ${goal}点 ／ ${tasteLabel}</p>
+          <p class="hint">人数 ${have}/${target}（不足分は開始時にCPU）</p>
           <div class="action-row" style="max-width:16rem;margin:0.75rem auto">
             <button type="button" class="btn ghost" data-act="open-rules">ルール</button>
             <button type="button" class="btn ghost" data-act="open-ref">効果表</button>
@@ -91,7 +97,7 @@ export class GameUI {
           ${
             canStart
               ? `<button type="button" class="btn primary big" data-act="startGame" ${lock}>はじめる</button>`
-              : `<p class="hint">2〜4人になったらホストが「はじめる」を押してください</p>`
+              : `<p class="hint">ホストが「はじめる」を押すと開始します</p>`
           }
           <div class="result-actions" style="margin-top:1rem">
             <button type="button" class="btn ghost" data-act="lobby">ホームへ</button>
@@ -107,6 +113,7 @@ export class GameUI {
       const winner = view.players[view.winnerIndex];
       const goal = view.winScore ?? WIN_SCORE;
       const canRematch = role === "host" || role === "solo";
+      document.body.style.removeProperty("--turn-seat");
       this.root.innerHTML = `
         <div class="panel finished result-panel">
           ${this._disconnectBanner(connectionStatus, { role, canReconnect })}
@@ -120,7 +127,7 @@ export class GameUI {
                 ? `<button type="button" class="btn primary" data-act="rematch" ${lock}>もう一度プレイ</button>`
                 : `<p class="hint">ホストが再戦できます</p>`
             }
-            <button type="button" class="btn ${canRematch ? "ghost" : "primary"}" data-act="lobby">ロビーへ</button>
+            <button type="button" class="btn ${canRematch ? "ghost" : "primary"}" data-act="lobby">ホームへ</button>
             <button type="button" class="btn ghost" data-act="open-rules">ルール</button>
             <button type="button" class="btn ghost" data-act="open-ref">効果を見る</button>
           </div>
@@ -134,6 +141,8 @@ export class GameUI {
     const me = view.myIndex >= 0 ? view.players[view.myIndex] : null;
     const others = view.players.filter((_, i) => i !== view.myIndex);
     const myTurn = view.turn === view.myIndex;
+    const turnColor = SEAT_COLORS[view.turn % 4];
+    document.body.style.removeProperty("--turn-seat");
     const tasteOpen =
       view.phase === "taste_window" &&
       view.pendingPublic &&
@@ -150,19 +159,9 @@ export class GameUI {
       (view.phase === "discard_draw" || view.phase === "cook" || view.phase === "end_hand");
 
     this.root.innerHTML = `
-      <div class="table-shell table-playing">
+      <div class="table-shell table-playing" style="--turn-seat:${turnColor}">
         ${this._disconnectBanner(connectionStatus, { role, canReconnect })}
         ${this._turnBanner(view, myTurn, role, roomId)}
-        <header class="table-header">
-          <div class="brand">THE NOODLES</div>
-          <div class="meta">
-            <span class="mode-badge">${escapeHtml(RULE_LABELS[view.ruleSet] || "")}</span>
-            <button type="button" class="btn ghost" data-act="open-helper">お助け</button>
-            <button type="button" class="btn ghost" data-act="open-rules">ルール</button>
-            <button type="button" class="btn ghost" data-act="open-ref">効果を見る</button>
-            ${roomId ? `<span class="room-chip">${escapeHtml(roomId)}</span>` : ""}
-          </div>
-        </header>
 
         <section class="scores">${this._scoreboard(view)}
           <div class="goal">目標 ${view.winScore ?? WIN_SCORE}点</div>
@@ -257,7 +256,7 @@ export class GameUI {
           ${(dish.names || [])
             .map(
               (n) =>
-                `<div class="cook-reveal-card"><img src="${cardImagePath(n)}" alt="${escapeHtml(n)}" /><span>${escapeHtml(n)}</span></div>`
+                `<div class="cook-reveal-card"><img src="${cardImagePath(n)}" alt="${escapeHtml(n)}" /></div>`
             )
             .join("")}
         </div>
@@ -309,6 +308,9 @@ export class GameUI {
       role === "solo" && !myTurn && view.phase !== "taste_window" && view.phase !== "cook_reveal"
         ? `<span class="hot-tag">CPU…</span>`
         : "";
+    const mode = RULE_LABELS[view.ruleSet]
+      ? `<span class="mode-badge mode-badge--inline">${escapeHtml(RULE_LABELS[view.ruleSet])}</span>`
+      : "";
     const roomChip = roomId ? `<span class="room-chip room-chip--inline">${escapeHtml(roomId)}</span>` : "";
     return `
       <div class="turn-banner" style="--seat:${color}">
@@ -316,14 +318,15 @@ export class GameUI {
           <strong>${escapeHtml(cur?.name || "?")}</strong>
           <span class="turn-phase">${phase}</span>
           <span class="turn-you">${you}</span>
+          ${mode}
           ${roomChip}
+          ${waitingCpu}
         </div>
         <div class="turn-tools">
           <button type="button" class="btn ghost btn-tool" data-act="open-helper">お助け</button>
           <button type="button" class="btn ghost btn-tool" data-act="open-rules">ルール</button>
           <button type="button" class="btn ghost btn-tool" data-act="open-ref">効果表</button>
         </div>
-        ${waitingCpu}
       </div>`;
   }
 
@@ -416,17 +419,21 @@ export class GameUI {
   }
 
   _resultScoreboard(view) {
-    return `<div class="scoreboard result-scoreboard">${view.players
-      .map((p, i) => {
+    const ranked = view.players
+      .map((p, i) => ({ p, i }))
+      .sort((a, b) => b.p.score - a.p.score || a.i - b.i);
+    return `<div class="scoreboard result-scoreboard">${ranked
+      .map(({ p, i }, rank) => {
         const won = i === view.winnerIndex;
         return `
           <div class="result-seat ${won ? "winner" : ""} ${p.isCpu ? "is-cpu" : ""}" style="--seat:${SEAT_COLORS[i % 4]}">
-            <div class="result-seat-head">
+            <div class="result-seat-line">
+              <span class="result-rank">${rank + 1}位</span>
               <span class="result-seat-name">${escapeHtml(p.name)}</span>
-              ${p.isCpu ? `<span class="player-tag cpu">CPU</span>` : `<span class="player-tag human">プレイヤー</span>`}
+              ${p.isCpu ? `<span class="player-tag cpu">CPU</span>` : ""}
               ${won ? `<span class="player-tag win">勝者</span>` : ""}
+              <strong class="result-seat-score">${p.score}<small>点</small></strong>
             </div>
-            <strong class="result-seat-score">${p.score}<small>点</small></strong>
           </div>`;
       })
       .join("")}</div>`;
@@ -457,6 +464,25 @@ export class GameUI {
   }
 
   _helperPanelHtml(view) {
+    const tab = ["cooks", "tips", "tops"].includes(this.helperTab) ? this.helperTab : "cooks";
+    return `
+      <div class="modal-backdrop" data-act="close-helper">
+        <div class="modal helper-modal" onclick="event.stopPropagation()">
+          <header class="ref-header">
+            <h2>お助け — 組み合わせガイド</h2>
+            <button type="button" class="modal-close" data-act="close-helper">×</button>
+          </header>
+          <div class="panel-tabs helper-tabs" role="tablist">
+            <button type="button" class="panel-tab ${tab === "cooks" ? "active" : ""}" role="tab" aria-selected="${tab === "cooks"}" data-act="helper-tab" data-tab="cooks">手札の料理</button>
+            <button type="button" class="panel-tab ${tab === "tips" ? "active" : ""}" role="tab" aria-selected="${tab === "tips"}" data-act="helper-tab" data-tab="tips">強化のヒント</button>
+            <button type="button" class="panel-tab ${tab === "tops" ? "active" : ""}" role="tab" aria-selected="${tab === "tops"}" data-act="helper-tab" data-tab="tops">強い組み合わせ</button>
+          </div>
+          <div class="helper-body">${this._helperTabBodyHtml(view, tab)}</div>
+        </div>
+      </div>`;
+  }
+
+  _helperTabBodyHtml(view, tab) {
     const ruleSet = view?.ruleSet || "noodles";
     const me = view?.players?.[view.myIndex];
     const handNames = (me?.hand || []).map((c) => c.name);
@@ -467,63 +493,58 @@ export class GameUI {
     const cooks = bestCooksFromHand(handNames, ruleSet);
     const tips = suggestImprovements(base.slice(0, 5), ruleSet, 8);
     const tops = topCombinations(ruleSet, 8);
-
     const renderCardImages = (names) =>
       names.map((n) => `<img src="${cardImagePath(n)}" alt="${escapeHtml(n)}" class="mini-card" />`).join("");
 
+    if (tab === "tips") {
+      return `
+        <section>
+          <h3>いまの手札／選択を強くするには</h3>
+          <p class="hint">基準 ${tips.currentPoints}点</p>
+          ${
+            tips.suggestions.length
+              ? `<ul class="helper-list">${tips.suggestions
+                  .map(
+                    (s) =>
+                      `<li><span class="tag">${escapeHtml(s.type)}</span> ${escapeHtml(s.action)} → <strong>${s.points}点</strong> <em>(+${s.diff})</em><br><div class="mini-card-row">${renderCardImages(s.resultHand)}</div></li>`
+                  )
+                  .join("")}</ul>`
+              : `<p class="hint">これ以上の改善案は見つかりませんでした</p>`
+          }
+        </section>`;
+    }
+    if (tab === "tops") {
+      return `
+        <section>
+          <h3>強い組み合わせ TOP（${ruleSet === "classic" ? "本家" : "フル"}）</h3>
+          <ul class="helper-list">${tops
+            .map(
+              (c) =>
+                `<li><strong>${c.points}点</strong> <div class="mini-card-row">${renderCardImages(c.cards)}</div></li>`
+            )
+            .join("")}</ul>
+        </section>`;
+    }
     return `
-      <div class="modal-backdrop" data-act="close-helper">
-        <div class="modal helper-modal" onclick="event.stopPropagation()">
-          <header class="ref-header">
-            <h2>お助け — 組み合わせガイド</h2>
-            <button type="button" class="modal-close" data-act="close-helper">×</button>
-          </header>
-          <div class="helper-body">
-            <section>
-              <h3>手札から作れる料理（高い順）</h3>
-              ${
-                cooks.length
-                  ? `<ul class="helper-list">${cooks
-                      .map(
-                        (c) =>
-                          `<li><strong>${c.points}点</strong> <div class="mini-card-row">${renderCardImages(c.cards)}</div></li>`
-                      )
-                      .join("")}</ul>`
-                  : `<p class="hint">必須食材を含む3枚以上が必要です</p>`
-              }
-            </section>
-            <section>
-              <h3>いまの手札／選択を強くするには</h3>
-              <p class="hint">基準 ${tips.currentPoints}点</p>
-              ${
-                tips.suggestions.length
-                  ? `<ul class="helper-list">${tips.suggestions
-                      .map(
-                        (s) =>
-                          `<li><span class="tag">${escapeHtml(s.type)}</span> ${escapeHtml(s.action)} → <strong>${s.points}点</strong> <em>(+${s.diff})</em><br><div class="mini-card-row">${renderCardImages(s.resultHand)}</div></li>`
-                      )
-                      .join("")}</ul>`
-                  : `<p class="hint">これ以上の改善案は見つかりませんでした</p>`
-              }
-            </section>
-            <section>
-              <h3>強い組み合わせ TOP（${ruleSet === "classic" ? "本家" : "フル"}）</h3>
-              <ul class="helper-list">${tops
+      <section>
+        <h3>手札から作れる料理（高い順）</h3>
+        ${
+          cooks.length
+            ? `<ul class="helper-list">${cooks
                 .map(
                   (c) =>
                     `<li><strong>${c.points}点</strong> <div class="mini-card-row">${renderCardImages(c.cards)}</div></li>`
                 )
-                .join("")}</ul>
-            </section>
-          </div>
-        </div>
-      </div>`;
+                .join("")}</ul>`
+            : `<p class="hint">必須食材を含む3枚以上が必要です</p>`
+        }
+      </section>`;
   }
 
   _detailModalHtml(name, ruleSet = "noodles") {
     const fx = getCardEffect(name, ruleSet);
     return `
-      <div class="modal-backdrop" data-act="close-detail">
+      <div class="modal-backdrop detail-backdrop" data-act="close-detail">
         <div class="modal detail-modal" onclick="event.stopPropagation()">
           <button type="button" class="modal-close" data-act="close-detail">×</button>
           <div class="detail-layout">
@@ -543,8 +564,112 @@ export class GameUI {
       </div>`;
   }
 
+  _showDetail(name) {
+    if (!name) return;
+    this.detailName = name;
+    const ruleSet = this.lastView?.ruleSet || "noodles";
+    const html = this._detailModalHtml(name, ruleSet);
+    const existing = this.root.querySelector(".detail-backdrop");
+    if (existing) {
+      const tmp = document.createElement("div");
+      tmp.innerHTML = html;
+      const nextModal = tmp.querySelector(".detail-modal");
+      const prevModal = existing.querySelector(".detail-modal");
+      if (prevModal && nextModal) {
+        nextModal.classList.add("detail-modal--swap");
+        prevModal.replaceWith(nextModal);
+        this._bindOverlayNode(existing);
+      }
+      return;
+    }
+    const tmp = document.createElement("div");
+    tmp.innerHTML = html;
+    const node = tmp.firstElementChild;
+    if (!node) return;
+    this.root.appendChild(node);
+    this._bindOverlayNode(node);
+  }
+
+  _hideDetail() {
+    this.detailName = null;
+    this.root.querySelectorAll(".detail-backdrop").forEach((el) => el.remove());
+  }
+
+  _bindOverlayNode(node) {
+    if (!node) return;
+    const bindAct = (el) => {
+      el.addEventListener("click", (e) => {
+        e.stopPropagation();
+        this._handleAct(el.getAttribute("data-act"), el);
+      });
+    };
+    if (node.matches?.("[data-act]")) bindAct(node);
+    node.querySelectorAll("[data-act]").forEach(bindAct);
+  }
+
+  _animateHeightSwap(el, html) {
+    if (!el) return;
+    const from = el.getBoundingClientRect().height;
+    el.style.transition = "none";
+    el.style.overflow = "hidden";
+    el.style.height = `${from}px`;
+    el.innerHTML = html;
+
+    // height 固定中は scrollHeight が縮まないことがあるので、一旦 auto で自然高さを測る
+    el.style.height = "auto";
+    const to = el.getBoundingClientRect().height;
+    el.style.height = `${from}px`;
+    void el.offsetHeight;
+
+    el.style.transition = "height 0.28s var(--ease)";
+    requestAnimationFrame(() => {
+      el.style.height = `${to}px`;
+    });
+
+    let cleared = false;
+    const clear = () => {
+      if (cleared) return;
+      cleared = true;
+      el.style.height = "";
+      el.style.overflow = "";
+      el.style.transition = "";
+      el.removeEventListener("transitionend", onEnd);
+    };
+    const onEnd = (e) => {
+      if (e.target === el && e.propertyName === "height") clear();
+    };
+    el.addEventListener("transitionend", onEnd);
+    setTimeout(clear, 360);
+  }
+
+  _bindInfoButtons(scope) {
+    (scope || this.root).querySelectorAll("[data-info]").forEach((el) => {
+      el.addEventListener("click", (e) => {
+        e.stopPropagation();
+        this._showDetail(el.getAttribute("data-info"));
+      });
+    });
+  }
+
+  _patchHelperTab() {
+    const modal = this.root.querySelector(".helper-modal");
+    if (!modal || !this.lastView) return;
+    const tab = this.helperTab;
+    modal.querySelectorAll(".panel-tab").forEach((el) => {
+      const on = el.getAttribute("data-tab") === tab;
+      el.classList.toggle("active", on);
+      el.setAttribute("aria-selected", on ? "true" : "false");
+    });
+    const body = modal.querySelector(".helper-body");
+    if (body) this._animateHeightSwap(body, this._helperTabBodyHtml(this.lastView, tab));
+  }
+
   _referencePanelHtml(ruleSet) {
     const groups = effectsByCategory(ruleSet);
+    const labels = groups.map((g) => g.label);
+    if (!this.refTab || !labels.includes(this.refTab)) {
+      this.refTab = labels[0] || null;
+    }
     return `
       <div class="modal-backdrop" data-act="close-ref">
         <div class="modal ref-modal" onclick="event.stopPropagation()">
@@ -552,30 +677,59 @@ export class GameUI {
             <h2>カードの効果</h2>
             <button type="button" class="modal-close" data-act="close-ref">×</button>
           </header>
-          <div class="ref-list">${groups
-            .map(
-              (g) => `
-            <section class="ref-group">
-              <h3>${escapeHtml(g.label)}</h3>
-              ${g.cards
-                .map(
-                  (c) => `
-                <button type="button" class="ref-row ${c.inSet ? "" : "dim"}" data-info="${escapeHtml(c.name)}">
-                  <img src="${cardImagePath(c.name)}" alt="" />
-                  <div>
-                    <strong>${escapeHtml(c.name)}</strong>
-                    <span class="ref-stats">${escapeHtml(c.base)} ／ ${escapeHtml(c.countLabel)}</span>
-                    <p>${escapeHtml(c.effect)}</p>
-                    ${c.discard ? `<p class="ref-discard">${escapeHtml(c.discard)}</p>` : ""}
-                  </div>
-                </button>`
-                )
-                .join("")}
-            </section>`
-            )
-            .join("")}</div>
+          <div class="panel-tabs ref-tabs" role="tablist">
+            ${labels
+              .map(
+                (label) => `
+              <button type="button" class="panel-tab ${label === this.refTab ? "active" : ""}" role="tab" aria-selected="${label === this.refTab}" data-act="ref-tab" data-tab="${escapeHtml(label)}">${escapeHtml(label)}</button>`
+              )
+              .join("")}
+          </div>
+          <div class="ref-list">${this._refTabBodyHtml(ruleSet, this.refTab)}</div>
         </div>
       </div>`;
+  }
+
+  _refTabBodyHtml(ruleSet, tabLabel) {
+    const groups = effectsByCategory(ruleSet);
+    const active = groups.find((g) => g.label === tabLabel) || groups[0];
+    if (!active) return "";
+    return `<section class="ref-group">
+      <h3 class="ref-group-title">${escapeHtml(active.label)}</h3>
+      ${active.cards
+        .map(
+          (c) => `
+        <button type="button" class="ref-row ${c.inSet ? "" : "dim"}" data-info="${escapeHtml(c.name)}">
+          <img src="${cardImagePath(c.name)}" alt="" />
+          <div class="ref-row-body">
+            <div class="ref-row-head">
+              <strong>${escapeHtml(c.name)}</strong>
+              <span class="ref-stats">${escapeHtml(c.base)} ／ ${escapeHtml(c.countLabel)}</span>
+            </div>
+            <p class="ref-effect">${escapeHtml(c.effect)}</p>
+            ${c.discard ? `<p class="ref-discard">${escapeHtml(c.discard)}</p>` : ""}
+          </div>
+        </button>`
+        )
+        .join("")}
+    </section>`;
+  }
+
+  _patchRefTab() {
+    const modal = this.root.querySelector(".ref-modal");
+    if (!modal || !this.lastView) return;
+    const ruleSet = this.lastView.ruleSet || "noodles";
+    const tab = this.refTab;
+    modal.querySelectorAll(".panel-tab").forEach((el) => {
+      const on = el.getAttribute("data-tab") === tab;
+      el.classList.toggle("active", on);
+      el.setAttribute("aria-selected", on ? "true" : "false");
+    });
+    const list = modal.querySelector(".ref-list");
+    if (list) {
+      this._animateHeightSwap(list, this._refTabBodyHtml(ruleSet, tab));
+      this._bindInfoButtons(list);
+    }
   }
 
   _scoreboard(view) {
@@ -679,13 +833,7 @@ export class GameUI {
         this._onCardClick(el);
       });
     });
-    this.root.querySelectorAll("[data-info]").forEach((el) => {
-      el.addEventListener("click", (e) => {
-        e.stopPropagation();
-        this.detailName = el.getAttribute("data-info");
-        this.render(this.lastView, this._lastMeta);
-      });
-    });
+    this._bindInfoButtons(this.root);
     this.root.querySelectorAll("[data-act]").forEach((btn) => {
       btn.addEventListener("click", (e) => {
         e.stopPropagation();
@@ -702,8 +850,7 @@ export class GameUI {
     const name = el.getAttribute("data-name");
 
     if (!myTurn || view.phase === "taste_window" || view.phase === "cook_reveal") {
-      this.detailName = name;
-      this.render(view, this._lastMeta);
+      this._showDetail(name);
       return;
     }
 
@@ -721,8 +868,7 @@ export class GameUI {
       this._toggleSelect(id, need);
       return;
     }
-    this.detailName = name;
-    this.render(view, this._lastMeta);
+    this._showDetail(name);
   }
 
   _toggleSelect(id, max) {
@@ -770,6 +916,14 @@ export class GameUI {
         this.showHelper = false;
         this.render(view, this._lastMeta);
         break;
+      case "helper-tab": {
+        const tab = btn?.getAttribute("data-tab");
+        if (tab === "cooks" || tab === "tips" || tab === "tops") {
+          this.helperTab = tab;
+          this._patchHelperTab();
+        }
+        break;
+      }
       case "open-rules":
         this.showRules = true;
         this.render(view, this._lastMeta);
@@ -786,9 +940,16 @@ export class GameUI {
         this.showReference = false;
         this.render(view, this._lastMeta);
         break;
+      case "ref-tab": {
+        const label = btn?.getAttribute("data-tab");
+        if (label) {
+          this.refTab = label;
+          this._patchRefTab();
+        }
+        break;
+      }
       case "close-detail":
-        this.detailName = null;
-        this.render(view, this._lastMeta);
+        this._hideDetail();
         break;
       case "clear-sel":
         this.selected.clear();

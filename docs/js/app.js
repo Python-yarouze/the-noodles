@@ -7,14 +7,20 @@ import { PeerRoom } from "./peer-room.js";
 import { GameUI } from "./ui.js";
 import { decideCpuAction } from "./ai.js";
 import { showAppToast } from "./fx.js";
-import { MAX_PLAYERS, clampWinScore, clampTasteMs } from "./deck.js";
+import { MAX_PLAYERS, clampWinScore, clampTasteMs, RULE_LABELS, cardImagePath } from "./deck.js";
+import { effectsByCategory } from "./card-effects.js";
 
 const lobbyEl = document.getElementById("lobby");
 const tableEl = document.getElementById("table");
 const statusEl = document.getElementById("global-status");
 const lobbyRulesModal = document.getElementById("lobby-rules-modal");
+const lobbyEffectsModal = document.getElementById("lobby-effects-modal");
+const lobbyHostConfirm = document.getElementById("lobby-host-confirm");
+const lobbyEffectsTabs = document.getElementById("lobby-effects-tabs");
+const lobbyEffectsList = document.getElementById("lobby-effects-list");
 
 const LOBBY_BTNS = ["btn-host", "btn-join", "btn-solo"];
+let lobbyEffectsTab = null;
 
 /** Actions that must not be double-fired while in flight. */
 const LOCKED_ACTIONS = new Set([
@@ -109,6 +115,7 @@ function showLobby(opts = {}) {
   tableEl.innerHTML = "";
   document.body.classList.remove("in-game", "match-playing", "match-finished");
   document.body.classList.add("in-lobby");
+  document.body.style.removeProperty("--turn-seat");
   setLobbyBusy(false);
   syncGlobalStatus();
 }
@@ -175,6 +182,11 @@ function soloCpuCount() {
   return Math.min(MAX_PLAYERS - 1, Math.max(1, n));
 }
 
+function lobbySeatCount() {
+  const n = Number(document.getElementById("seat-count")?.value || 4);
+  return Math.min(MAX_PLAYERS, Math.max(2, n));
+}
+
 function lobbySettings() {
   const winScore = clampWinScore(document.getElementById("win-score")?.value || 50);
   const tasteSec = Number(document.getElementById("taste-sec")?.value ?? 15);
@@ -187,6 +199,7 @@ function lobbySettings() {
 function applyLobbySettings(g) {
   g.setRuleSet(selectedRuleSet());
   g.setSettings(lobbySettings());
+  g.setTargetSeats(lobbySeatCount());
 }
 
 function bindGameChange() {
@@ -200,6 +213,7 @@ function canGuestReconnect() {
 
 function refresh() {
   if (!ui) return;
+  const target = game?.state?.targetSeats || MAX_PLAYERS;
   const meta = {
     connectionStatus,
     role,
@@ -207,11 +221,8 @@ function refresh() {
     isHost: role === "host",
     actionsLocked: actionBusy,
     canReconnect: canGuestReconnect(),
-    canStart:
-      role === "host" &&
-      game &&
-      game.state.status === "waiting" &&
-      game.state.players.length >= 2,
+    canStart: role === "host" && game && game.state.status === "waiting" && game.state.players.length >= 1,
+    targetSeats: target,
   };
   ui.setMeta(meta);
   syncGlobalStatus();
@@ -227,6 +238,7 @@ function refresh() {
     const view = game.viewFor(myId);
     ui.render(view, meta);
     broadcastViews();
+    scheduleCpu();
     return;
   }
 
@@ -239,8 +251,13 @@ function refresh() {
   }
 }
 
+function hasCpuPlayers() {
+  return !!game?.state?.players?.some((p) => p.isCpu);
+}
+
 function scheduleCpu() {
-  if (role !== "solo" || !game || cpuBusy) return;
+  if (!game || cpuBusy) return;
+  if (role !== "solo" && !(role === "host" && hasCpuPlayers())) return;
   const action = decideCpuAction(game.state);
   if (!action) return;
   clearCpuTimer();
@@ -250,7 +267,8 @@ function scheduleCpu() {
 
 function runCpuStep() {
   cpuTimer = null;
-  if (role !== "solo" || !game || cpuBusy) return;
+  if (!game || cpuBusy) return;
+  if (role !== "solo" && !(role === "host" && hasCpuPlayers())) return;
   const action = decideCpuAction(game.state);
   if (!action?.playerId) return;
 
@@ -268,6 +286,7 @@ function runCpuStep() {
 
 function broadcastViews() {
   if (role !== "host" || !room || !game) return;
+  room.pruneDeadConns?.();
   room.sendEach((peerId) => {
     const pid = peerToPlayer.get(peerId);
     if (!pid || pid === myId) return null;
@@ -370,23 +389,27 @@ function rematch() {
   actionBusy = true;
 
   try {
-    const players = game.state.players.map((p) => ({
-      id: p.id,
-      name: p.name,
-      isCpu: !!p.isCpu,
-    }));
+    const humans = game.state.players
+      .filter((p) => !p.isCpu)
+      .map((p) => ({
+        id: p.id,
+        name: p.name,
+        isCpu: false,
+      }));
     const ruleSet = game.state.ruleSet;
     const winScore = game.state.winScore;
     const tasteWindowMs = game.state.tasteWindowMs;
+    const targetSeats = game.state.targetSeats || MAX_PLAYERS;
 
     clearCpuTimer();
     cpuBusy = false;
     game = new NoodlesGame();
     game.setRuleSet(ruleSet);
     game.setSettings({ winScore, tasteWindowMs });
+    game.setTargetSeats(targetSeats);
     bindGameChange();
-    for (const p of players) {
-      game.addPlayer(p.id, p.name, { isCpu: p.isCpu });
+    for (const p of humans) {
+      game.addPlayer(p.id, p.name, { isCpu: false });
     }
     const started = game.startGame();
     if (!started.ok) {
@@ -442,10 +465,27 @@ function handleUiAction(type, payload) {
   }
 }
 
+function onHostPeerClose(peerId) {
+  if (role !== "host" || !game) return;
+  const pid = peerToPlayer.get(peerId);
+  peerToPlayer.delete(peerId);
+  if (!pid) {
+    refresh();
+    return;
+  }
+  const player = game.state.players.find((p) => p.id === pid);
+  const name = player?.name || "ゲスト";
+  if (game.state.status === "waiting") {
+    game.removePlayer(pid);
+    setStatus(`${name} が退室しました`);
+    return;
+  }
+  setStatus(`${name} が切断（再接続待ち）`);
+}
+
 function onPeerMessage(msg, meta = {}) {
   if (role === "host") {
     if (msg.type === "join" || msg.type === "rejoin") {
-      // One PeerJS connection = one seat (ignore join spam with new ids).
       if (meta.peerId && peerToPlayer.has(meta.peerId)) {
         const seatedId = peerToPlayer.get(meta.peerId);
         sendJoined(meta.peerId, seatedId);
@@ -457,6 +497,9 @@ function onPeerMessage(msg, meta = {}) {
       if (existing) {
         if (meta.peerId) peerToPlayer.set(meta.peerId, msg.playerId);
         sendJoined(meta.peerId, msg.playerId);
+        if (game.state.status === "playing" || game.state.status === "finished") {
+          connectionStatus = "";
+        }
         refresh();
         return;
       }
@@ -465,7 +508,7 @@ function onPeerMessage(msg, meta = {}) {
           if (meta.peerId) {
             room.sendToPeer(meta.peerId, {
               type: "error",
-              reason: "この席は見つかりません。ホストに新規参加できるか確認してください",
+              reason: "この席は見つかりません。ホームへ戻ってから参加し直してください",
             });
           }
           return;
@@ -484,7 +527,6 @@ function onPeerMessage(msg, meta = {}) {
     }
     if (msg.type === "action") {
       const pid = msg.playerId || peerToPlayer.get(meta.peerId);
-      // Prefer mapped seat over spoofed playerId from a known peer.
       const mapped = meta.peerId ? peerToPlayer.get(meta.peerId) : null;
       handleHostAction(mapped || pid, msg.action, msg.payload || {});
       return;
@@ -504,7 +546,11 @@ function onPeerMessage(msg, meta = {}) {
     }
     if (msg.type === "error") {
       actionBusy = false;
-      showAppToast(msg.reason || "エラー");
+      const reason = msg.reason || "エラー";
+      showAppToast(reason);
+      if (String(reason).includes("満員")) {
+        setStatus("部屋が満員です。一度ホームへ戻るか、少し待って再接続してください");
+      }
       refresh();
       return;
     }
@@ -514,17 +560,52 @@ function onPeerMessage(msg, meta = {}) {
         const name = document.getElementById("name-input")?.value.trim() || "ゲスト";
         saveSeat(roomId, myId, name);
       }
-      setStatus("部屋に参加しました。ホストの開始を待ってね");
+      setStatus("部屋に参加しました。ホストの開始を待っています");
     }
   }
 }
 
 async function startHost() {
   if (lobbyBusy) return;
+  openHostConfirm();
+}
+
+function hostSettingsSummary() {
+  const rule = selectedRuleSet();
+  const { winScore, tasteWindowMs } = lobbySettings();
+  const seats = lobbySeatCount();
+  const tasteLabel = tasteWindowMs ? `${Math.round(tasteWindowMs / 1000)}秒` : "制限なし";
+  return [
+    ["ルールセット", RULE_LABELS[rule] || rule],
+    ["目標ポイント", `${winScore}点`],
+    ["味見の制限時間", tasteLabel],
+    ["オンライン人数", `${seats}人（不足分はCPU）`],
+    ["あなたの名前", document.getElementById("name-input")?.value.trim() || "ホスト"],
+  ];
+}
+
+function openHostConfirm() {
+  const list = document.getElementById("host-confirm-summary");
+  if (list) {
+    list.innerHTML = hostSettingsSummary()
+      .map(([label, value]) => `<li><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong></li>`)
+      .join("");
+  }
+  if (lobbyHostConfirm) lobbyHostConfirm.hidden = false;
+}
+
+function closeHostConfirm() {
+  if (lobbyHostConfirm) lobbyHostConfirm.hidden = true;
+}
+
+async function confirmAndCreateHost() {
+  if (lobbyBusy) return;
+  closeHostConfirm();
   setLobbyBusy(true);
   destroyRoomOnly();
 
   const name = document.getElementById("name-input").value.trim() || "ホスト";
+  const seats = lobbySeatCount();
   role = "host";
   myId = `host-${Math.random().toString(36).slice(2, 8)}`;
   game = new NoodlesGame();
@@ -536,15 +617,16 @@ async function startHost() {
 
   room = new PeerRoom({
     role: "host",
-    maxGuests: MAX_PLAYERS - 1,
+    maxGuests: seats - 1,
     onMessage: onPeerMessage,
     onStatus: setStatus,
+    onPeerClose: onHostPeerClose,
   });
 
   try {
     roomId = await room.connect();
     showTable();
-    setStatus(`部屋 ${roomId} — 2〜4人そろったら「はじめる」`);
+    setStatus(`部屋 ${roomId} — ${seats}人部屋（不足分は開始時にCPU）`);
   } catch (e) {
     console.error(e);
     showAppToast("部屋の作成に失敗しました");
@@ -552,6 +634,67 @@ async function startHost() {
   } finally {
     setLobbyBusy(false);
   }
+}
+
+function escapeHtml(s) {
+  return String(s ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+function openLobbyEffects() {
+  renderLobbyEffects();
+  if (lobbyEffectsModal) lobbyEffectsModal.hidden = false;
+}
+
+function closeLobbyEffects() {
+  if (lobbyEffectsModal) lobbyEffectsModal.hidden = true;
+}
+
+function renderLobbyEffects() {
+  if (!lobbyEffectsTabs || !lobbyEffectsList) return;
+  const ruleSet = selectedRuleSet();
+  const groups = effectsByCategory(ruleSet);
+  const labels = groups.map((g) => g.label);
+  if (!lobbyEffectsTab || !labels.includes(lobbyEffectsTab)) {
+    lobbyEffectsTab = labels[0] || null;
+  }
+  lobbyEffectsTabs.innerHTML = labels
+    .map(
+      (label) =>
+        `<button type="button" class="panel-tab ${label === lobbyEffectsTab ? "active" : ""}" data-lobby-tab="${escapeHtml(label)}">${escapeHtml(label)}</button>`
+    )
+    .join("");
+  const active = groups.find((g) => g.label === lobbyEffectsTab) || groups[0];
+  lobbyEffectsList.innerHTML = active
+    ? `<section class="ref-group">
+        <h3 class="ref-group-title">${escapeHtml(active.label)}</h3>
+        ${active.cards
+          .map(
+            (c) => `
+          <div class="ref-row ${c.inSet ? "" : "dim"}">
+            <img src="${cardImagePath(c.name)}" alt="" />
+            <div class="ref-row-body">
+              <div class="ref-row-head">
+                <strong>${escapeHtml(c.name)}</strong>
+                <span class="ref-stats">${escapeHtml(c.base)} ／ ${escapeHtml(c.countLabel)}</span>
+              </div>
+              <p class="ref-effect">${escapeHtml(c.effect)}</p>
+              ${c.discard ? `<p class="ref-discard">${escapeHtml(c.discard)}</p>` : ""}
+            </div>
+          </div>`
+          )
+          .join("")}
+      </section>`
+    : "";
+  lobbyEffectsTabs.querySelectorAll("[data-lobby-tab]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      lobbyEffectsTab = btn.getAttribute("data-lobby-tab");
+      renderLobbyEffects();
+    });
+  });
 }
 
 async function startGuest() {
@@ -664,12 +807,9 @@ function startSolo() {
     actionBusy = false;
     game = new NoodlesGame();
     applyLobbySettings(game);
+    game.setTargetSeats(1 + cpuN);
     bindGameChange();
     game.addPlayer("local-0", name);
-    for (let i = 0; i < cpuN; i++) {
-      const label = i === 0 ? "CPU" : `CPU${i + 1}`;
-      game.addPlayer(`cpu-${i}`, label, { isCpu: true });
-    }
     game.startGame();
     connectionStatus = "";
     showTable();
@@ -691,10 +831,31 @@ document.getElementById("btn-host")?.addEventListener("click", startHost);
 document.getElementById("btn-join")?.addEventListener("click", startGuest);
 document.getElementById("btn-solo")?.addEventListener("click", startSolo);
 document.getElementById("btn-rules")?.addEventListener("click", openLobbyRules);
+document.getElementById("btn-effects")?.addEventListener("click", openLobbyEffects);
 document.getElementById("btn-close-lobby-rules")?.addEventListener("click", closeLobbyRules);
+document.getElementById("btn-close-lobby-effects")?.addEventListener("click", closeLobbyEffects);
+document.getElementById("btn-close-host-confirm")?.addEventListener("click", closeHostConfirm);
+document.getElementById("btn-host-cancel")?.addEventListener("click", closeHostConfirm);
+document.getElementById("btn-host-confirm")?.addEventListener("click", confirmAndCreateHost);
 lobbyRulesModal?.addEventListener("click", (e) => {
   if (e.target === lobbyRulesModal) closeLobbyRules();
 });
+lobbyEffectsModal?.addEventListener("click", (e) => {
+  if (e.target === lobbyEffectsModal) closeLobbyEffects();
+});
+lobbyHostConfirm?.addEventListener("click", (e) => {
+  if (e.target === lobbyHostConfirm) closeHostConfirm();
+});
+
+document.querySelectorAll('input[name="rule-set"]').forEach((el) => {
+  el.addEventListener("change", () => {
+    syncLobbySummary();
+    if (lobbyEffectsModal && !lobbyEffectsModal.hidden) renderLobbyEffects();
+  });
+});
+document.getElementById("win-score")?.addEventListener("input", syncLobbySummary);
+document.getElementById("taste-sec")?.addEventListener("input", syncLobbySummary);
+document.getElementById("seat-count")?.addEventListener("change", syncLobbySummary);
 
 function syncLobbySummary() {
   const ruleVal = document.querySelector(".lobby-details .details-summary-val");
@@ -703,16 +864,13 @@ function syncLobbySummary() {
   if (ruleVal) ruleVal.textContent = rule === "classic" ? "本家ルール" : "THE NOODLES";
   const win = document.getElementById("win-score")?.value || 50;
   const taste = Number(document.getElementById("taste-sec")?.value ?? 15);
+  const seats = lobbySeatCount();
   if (settingsVal) {
-    settingsVal.textContent = Number(taste) === 0 ? `${win}点・制限なし` : `${win}点・${taste}秒`;
+    const tastePart = Number(taste) === 0 ? "制限なし" : `${taste}秒`;
+    settingsVal.textContent = `${win}点・${tastePart}・${seats}人`;
   }
 }
 
-document.querySelectorAll('input[name="rule-set"]').forEach((el) => {
-  el.addEventListener("change", syncLobbySummary);
-});
-document.getElementById("win-score")?.addEventListener("input", syncLobbySummary);
-document.getElementById("taste-sec")?.addEventListener("input", syncLobbySummary);
 syncLobbySummary();
 
 showLobby();

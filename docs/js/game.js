@@ -36,6 +36,7 @@ export function createEmptyState() {
     ruleSet: "noodles",
     winScore: WIN_SCORE,
     tasteWindowMs: TASTE_WINDOW_MS,
+    targetSeats: MAX_PLAYERS,
     deck: [],
     discardPile: [],
     players: [],
@@ -115,9 +116,24 @@ export class NoodlesGame {
     return { ok: true };
   }
 
+  setTargetSeats(n) {
+    if (this.state.status !== "waiting") return { ok: false, reason: "開始後は変えられません" };
+    const seats = Math.min(MAX_PLAYERS, Math.max(MIN_PLAYERS, Number(n) || MAX_PLAYERS));
+    this.state.targetSeats = seats;
+    this._emit();
+    return { ok: true };
+  }
+
+  _seatCap() {
+    return this.state.targetSeats || MAX_PLAYERS;
+  }
+
   addPlayer(id, name, opts = {}) {
     if (this.state.status !== "waiting") return { ok: false, reason: "すでに開始済みです" };
-    if (this.state.players.length >= MAX_PLAYERS) return { ok: false, reason: "満員です（最大4人）" };
+    const cap = this._seatCap();
+    if (this.state.players.length >= cap) {
+      return { ok: false, reason: `部屋が満員です（${cap}人）` };
+    }
     if (this.state.players.some((p) => p.id === id)) return { ok: true };
     this.state.players.push(emptyPlayer(id, name || `Player ${this.state.players.length + 1}`, opts));
     this._log(`${name} が参加しました`);
@@ -125,13 +141,46 @@ export class NoodlesGame {
     return { ok: true };
   }
 
+  /** Waiting room only: drop a human who disconnected. */
+  removePlayer(id) {
+    if (this.state.status !== "waiting") {
+      return { ok: false, reason: "開始後は席を外せません" };
+    }
+    const idx = this.state.players.findIndex((p) => p.id === id);
+    if (idx < 0) return { ok: false, reason: "見つかりません" };
+    const p = this.state.players[idx];
+    if (p.isCpu) return { ok: false, reason: "CPUは外せません" };
+    this.state.players = this.state.players.filter((x) => x.id !== id);
+    this._log(`${p.name} が退室しました`);
+    this._emit({ type: "leave", name: p.name, playerId: id });
+    return { ok: true, name: p.name };
+  }
+
+  /** Fill empty target seats with CPUs before dealing. */
+  fillCpuSeats() {
+    if (this.state.status !== "waiting") return { ok: false };
+    const cap = this._seatCap();
+    let cpuIndex = 0;
+    while (this.state.players.length < cap) {
+      while (this.state.players.some((p) => p.id === `cpu-${cpuIndex}`)) cpuIndex += 1;
+      const id = `cpu-${cpuIndex}`;
+      const label = cpuIndex === 0 ? "CPU" : `CPU${cpuIndex + 1}`;
+      const r = this.addPlayer(id, label, { isCpu: true });
+      if (!r.ok) break;
+      cpuIndex += 1;
+    }
+    return { ok: true };
+  }
+
   startGame() {
+    this.fillCpuSeats();
     const n = this.state.players.length;
     if (n < MIN_PLAYERS) {
       return { ok: false, reason: `${MIN_PLAYERS}人以上必要です` };
     }
-    if (n > MAX_PLAYERS) {
-      return { ok: false, reason: `最大${MAX_PLAYERS}人までです` };
+    const cap = this._seatCap();
+    if (n > cap) {
+      return { ok: false, reason: `最大${cap}人までです` };
     }
     this._clearTasteTimer();
     this._clearCookRevealTimer();
@@ -431,7 +480,7 @@ export class NoodlesGame {
     const idx = this.state.players.findIndex((p) => p.id === playerId);
     if (idx < 0) return { ok: false, reason: "参加者ではありません" };
     if (idx === this.state.pendingAction.actorIndex) {
-      return { ok: false, reason: "伏せた本人はスキップできません（相手の判断を待ってね）" };
+      return { ok: false, reason: "伏せた本人はスキップできません（相手の判断を待っています）" };
     }
     const passes = this._tastePassIds();
     if (passes.includes(playerId)) {
@@ -694,6 +743,7 @@ export class NoodlesGame {
       ruleSet: s.ruleSet,
       winScore: s.winScore,
       tasteWindowMs: s.tasteWindowMs,
+      targetSeats: s.targetSeats || MAX_PLAYERS,
       turn: s.turn,
       phase: s.phase,
       usedDiscard1: s.usedDiscard1,

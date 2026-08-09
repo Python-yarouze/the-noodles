@@ -4,6 +4,7 @@
  */
 
 const GUEST_CONNECT_TIMEOUT_MS = 20000;
+const PENDING_MAX_MS = 20000;
 const FALLBACK_ICE_SERVERS = [{ urls: "stun:stun.l.google.com:19302" }];
 
 export function makeRoomCode() {
@@ -45,32 +46,101 @@ async function fetchIceServers(onStatus) {
 
 export class PeerRoom {
   /**
-   * @param {{ role: 'host'|'guest', roomId?: string, onMessage: (msg:any, meta?: {peerId?:string})=>void, onStatus: (s:string)=>void, maxGuests?: number }} opts
+   * @param {{ role: 'host'|'guest', roomId?: string, onMessage: (msg:any, meta?: {peerId?:string})=>void, onStatus: (s:string)=>void, onPeerClose?: (peerId:string)=>void, maxGuests?: number }} opts
    */
   constructor(opts) {
     this.role = opts.role;
     this.roomId = opts.roomId || makeRoomCode();
     this.onMessage = opts.onMessage;
     this.onStatus = opts.onStatus;
+    this.onPeerClose = opts.onPeerClose || null;
     this.maxGuests = opts.maxGuests ?? 3;
     this.peer = null;
     /** @type {Map<string, any>} peerId -> DataConnection */
     this.conns = new Map();
     /** Peer ids reserved at connection event (before open). */
     this.pendingPeers = new Set();
-    this.conn = null; // guest single connection
+    /** @type {Map<string, number>} */
+    this.pendingSince = new Map();
+    this.conn = null;
     this.connected = false;
+  }
+
+  totalSeats() {
+    return this.maxGuests + 1;
   }
 
   _slotCount() {
     return this.conns.size + this.pendingPeers.size;
   }
 
-  _releasePeer(peerId) {
+  _releasePeer(peerId, { notify = true } = {}) {
     if (!peerId) return;
+    const had =
+      this.pendingPeers.has(peerId) || this.conns.has(peerId) || this.pendingSince.has(peerId);
     this.pendingPeers.delete(peerId);
+    this.pendingSince.delete(peerId);
     this.conns.delete(peerId);
     this.connected = this.conns.size > 0;
+    if (notify && had) this.onPeerClose?.(peerId);
+  }
+
+  _isConnAlive(conn) {
+    if (!conn || conn.open !== true) return false;
+    try {
+      const pc = conn.peerConnection;
+      if (pc) {
+        const ice = pc.iceConnectionState;
+        const cs = pc.connectionState;
+        if (ice === "failed" || ice === "closed" || ice === "disconnected") return false;
+        if (cs === "failed" || cs === "closed" || cs === "disconnected") return false;
+      }
+    } catch (_) {
+      /* ignore */
+    }
+    return true;
+  }
+
+  /** Drop zombie / stale connections so sleep-reconnect can reclaim slots. */
+  pruneDeadConns() {
+    return this._pruneDeadConns();
+  }
+
+  _pruneDeadConns() {
+    const now = Date.now();
+    const removed = [];
+
+    for (const [peerId, conn] of [...this.conns.entries()]) {
+      if (this._isConnAlive(conn)) continue;
+      try {
+        conn.close();
+      } catch (_) {
+        /* ignore */
+      }
+      this.conns.delete(peerId);
+      this.pendingPeers.delete(peerId);
+      this.pendingSince.delete(peerId);
+      removed.push(peerId);
+    }
+
+    for (const peerId of [...this.pendingPeers]) {
+      const since = this.pendingSince.get(peerId) || 0;
+      if (now - since > PENDING_MAX_MS) {
+        this.pendingPeers.delete(peerId);
+        this.pendingSince.delete(peerId);
+        removed.push(peerId);
+      }
+    }
+
+    this.connected = this.conns.size > 0;
+    for (const peerId of removed) {
+      this.onPeerClose?.(peerId);
+    }
+    return removed.length;
+  }
+
+  _fullRoomReason() {
+    return `部屋が満員です（${this.totalSeats()}人）`;
   }
 
   async connect() {
@@ -100,7 +170,7 @@ export class PeerRoom {
         resolve(value);
       };
 
-      this.peer.on("open", (peerId) => {
+      this.peer.on("open", () => {
         this.onStatus(this.role === "host" ? `部屋待機中: ${this.roomId}` : `接続中…`);
 
         if (this.role === "guest") {
@@ -127,10 +197,22 @@ export class PeerRoom {
 
       this.peer.on("connection", (conn) => {
         if (this.role !== "host") return;
+        this._pruneDeadConns();
+
+        if (conn.peer && this.conns.has(conn.peer)) {
+          try {
+            this.conns.get(conn.peer)?.close();
+          } catch (_) {
+            /* ignore */
+          }
+          this._releasePeer(conn.peer, { notify: false });
+        }
+
+        this._pruneDeadConns();
         if (this._slotCount() >= this.maxGuests) {
           conn.on("open", () => {
             try {
-              conn.send({ type: "error", reason: "部屋が満員です（最大4人）" });
+              conn.send({ type: "error", reason: this._fullRoomReason() });
             } catch (_) {
               /* ignore */
             }
@@ -138,7 +220,11 @@ export class PeerRoom {
           });
           return;
         }
-        if (conn.peer) this.pendingPeers.add(conn.peer);
+
+        if (conn.peer) {
+          this.pendingPeers.add(conn.peer);
+          this.pendingSince.set(conn.peer, Date.now());
+        }
         this._bindHostConn(conn);
         this.onStatus(`ゲスト接続 ${this._slotCount()}/${this.maxGuests}`);
       });
@@ -161,7 +247,10 @@ export class PeerRoom {
 
   _bindHostConn(conn) {
     conn.on("open", () => {
-      if (conn.peer) this.pendingPeers.delete(conn.peer);
+      if (conn.peer) {
+        this.pendingPeers.delete(conn.peer);
+        this.pendingSince.delete(conn.peer);
+      }
       this.conns.set(conn.peer, conn);
       this.connected = this.conns.size > 0;
       this.onStatus(`接続中 ${this.conns.size} 人`);
@@ -206,7 +295,6 @@ export class PeerRoom {
     });
   }
 
-  /** Guest send, or host broadcast to all. */
   send(msg) {
     if (this.role === "guest") {
       if (!this.conn || !this.connected) return false;
@@ -225,7 +313,6 @@ export class PeerRoom {
     return ok;
   }
 
-  /** Host: send to one peer by PeerJS id, or by matching open connections. */
   sendToPeer(peerId, msg) {
     const c = this.conns.get(peerId);
     if (!c) return false;
@@ -233,7 +320,6 @@ export class PeerRoom {
     return true;
   }
 
-  /** Host: send personalized message via callback per connection. */
   sendEach(fn) {
     for (const [peerId, c] of this.conns) {
       const msg = fn(peerId);
@@ -246,6 +332,7 @@ export class PeerRoom {
       for (const c of this.conns.values()) c.close();
       this.conns.clear();
       this.pendingPeers.clear();
+      this.pendingSince.clear();
       if (this.conn) this.conn.close();
       if (this.peer) this.peer.destroy();
     } catch (_) {

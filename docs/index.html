@@ -4,6 +4,9 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>THE NOODLES</title>
+    <link rel="icon" href="assets/favicon.ico" sizes="any" />
+    <link rel="icon" type="image/png" href="assets/icon-32.png" sizes="32x32" />
+    <link rel="apple-touch-icon" href="assets/icon-180.png" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
@@ -18,7 +21,9 @@
 
     <main id="lobby">
       <header class="hero">
-        <h1 class="hero-title">THE NOODLES</h1>
+        <h1 class="hero-title">
+          <img src="assets/title.png" alt="THE NOODLES" class="title-logo" width="640" height="128" />
+        </h1>
         <p class="hero-sub">カードでラーメンを組み立て、先に目標点を目指す対戦ゲーム</p>
       </header>
 
@@ -47,7 +52,13 @@
             <input id="win-score" type="number" min="20" max="100" step="5" value="50" />
             <label for="taste-sec">味見の制限時間（秒・0＝制限なし）</label>
             <input id="taste-sec" type="number" min="0" max="60" step="1" value="15" />
-            <p class="settings-hint">ホスト／ソロ開始時に反映。デフォルトは50点・15秒。0で制限なし。</p>
+            <label for="seat-count">オンライン人数（不足分は開始時にCPU）</label>
+            <select id="seat-count" aria-label="オンライン人数">
+              <option value="2">2人</option>
+              <option value="3">3人</option>
+              <option value="4" selected>4人</option>
+            </select>
+            <p class="settings-hint">ホスト／ソロ開始時に反映。デフォルトは50点・15秒・4人。0で味見制限なし。</p>
           </fieldset>
         </details>
 
@@ -66,7 +77,10 @@
             </select>
             <button type="button" class="btn" id="btn-solo">1人でプレイ</button>
           </div>
-          <button type="button" class="btn ghost" id="btn-rules">ルールを見る</button>
+          <div class="lobby-guide-row">
+            <button type="button" class="btn ghost" id="btn-rules">ルール</button>
+            <button type="button" class="btn ghost" id="btn-effects">効果表</button>
+          </div>
         </div>
       </div>
     </main>
@@ -81,6 +95,34 @@
         </header>
         <div class="rules-sheet">
           <img src="assets/cards/rules.png" alt="THE NOODLES ルール" />
+        </div>
+      </div>
+    </div>
+
+    <div id="lobby-effects-modal" class="modal-backdrop" hidden>
+      <div class="modal ref-modal" role="dialog" aria-labelledby="lobby-effects-title" onclick="event.stopPropagation()">
+        <header class="ref-header">
+          <h2 id="lobby-effects-title">カードの効果</h2>
+          <button type="button" class="modal-close" id="btn-close-lobby-effects" aria-label="閉じる">×</button>
+        </header>
+        <div id="lobby-effects-tabs" class="panel-tabs ref-tabs" role="tablist"></div>
+        <div id="lobby-effects-list" class="ref-list"></div>
+      </div>
+    </div>
+
+    <div id="lobby-host-confirm" class="modal-backdrop" hidden>
+      <div class="modal host-confirm-modal" role="dialog" aria-labelledby="host-confirm-title" onclick="event.stopPropagation()">
+        <header class="ref-header">
+          <h2 id="host-confirm-title">この設定で部屋を作りますか？</h2>
+          <button type="button" class="modal-close" id="btn-close-host-confirm" aria-label="閉じる">×</button>
+        </header>
+        <div class="host-confirm-body">
+          <ul id="host-confirm-summary" class="host-confirm-list"></ul>
+          <p class="hint">あとから参加者側では変更できません。ホストの設定が使われます。</p>
+          <div class="host-confirm-actions">
+            <button type="button" class="btn ghost" id="btn-host-cancel">もどる</button>
+            <button type="button" class="btn primary" id="btn-host-confirm">この設定で作る</button>
+          </div>
         </div>
       </div>
     </div>
