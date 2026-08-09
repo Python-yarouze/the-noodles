@@ -607,41 +607,37 @@ export class GameUI {
       const blocked1 = view.usedDiscard1;
       const blocked2 = view.usedDiscard2;
       const dis1 = blocked1 || this._lastMeta?.actionsLocked ? "disabled" : "";
-      return `
-        <div class="action-block stack">
-          ${
-            n === 0
-              ? `
-            <button type="button" class="btn primary big" data-act="skip-discard" ${lock}>このまま料理へ →</button>
-            <button type="button" class="btn ghost" data-act="skip-all-cook" ${lock}>料理しない</button>`
-              : ""
-          }
-          ${
-            n === 1
-              ? `
-            <p class="decl-label">宣言して1枚伏せる</p>
-            <div class="decl-btns">
-              <button type="button" class="btn danger" data-act="confirm-single" data-decl="とり" ${dis1}>とり（2枚引き）</button>
-              <button type="button" class="btn danger" data-act="confirm-single" data-decl="ぶた" ${dis1}>ぶた（3枚引き）</button>
-              <button type="button" class="btn danger" data-act="confirm-single" data-decl="えび" ${dis1}>えび（4枚引き）</button>
+      if (n === 0) {
+        return `
+          <div class="action-block action-dock">
+            <div class="action-row">
+              <button type="button" class="btn primary" data-act="skip-discard" ${lock}>このまま料理へ</button>
+              <button type="button" class="btn ghost" data-act="skip-all-cook" ${lock}>料理しない</button>
             </div>
-            ${blocked1 ? `<p class="hint">1枚捨ては使用済みです</p>` : ""}`
-              : ""
-          }
-          ${
-            n === 2
-              ? `
-            <button type="button" class="btn danger big" data-act="confirm-pair" ${
+          </div>`;
+      }
+      if (n === 1) {
+        return `
+          <div class="action-block action-dock">
+            <div class="decl-btns">
+              <button type="button" class="btn danger" data-act="confirm-single" data-decl="とり" ${dis1}>とり×2</button>
+              <button type="button" class="btn danger" data-act="confirm-single" data-decl="ぶた" ${dis1}>ぶた×3</button>
+              <button type="button" class="btn danger" data-act="confirm-single" data-decl="えび" ${dis1}>えび×4</button>
+              <button type="button" class="btn ghost btn-clear-sel" data-act="clear-sel" title="選択をクリア">×</button>
+            </div>
+            ${blocked1 ? `<p class="hint action-dock-note">1枚捨て使用済み</p>` : ""}
+          </div>`;
+      }
+      return `
+        <div class="action-block action-dock">
+          <div class="action-row">
+            <button type="button" class="btn danger" data-act="confirm-pair" ${
               blocked2 || this._lastMeta?.actionsLocked ? "disabled" : ""
-            }>
-              ペアとして伏せる（3枚引き）
-            </button>
-            ${blocked2 ? `<p class="hint">2枚捨ては使用済みです</p>` : ""}`
-              : ""
-          }
-          ${n > 0 ? `<button type="button" class="btn ghost" data-act="clear-sel">選択をクリア</button>` : ""}
-        </div>
-        <p class="hint">${n === 0 ? "カードを選ぶか、料理へ進む／料理しないを選んでください" : "カードを1〜2枚選んでからボタンを押してください"}</p>`;
+            }>ペア伏せ（×3）</button>
+            <button type="button" class="btn ghost btn-clear-sel" data-act="clear-sel" title="選択をクリア">×</button>
+          </div>
+          ${blocked2 ? `<p class="hint action-dock-note">2枚捨て使用済み</p>` : ""}
+        </div>`;
     }
 
     if (view.phase === "cook") {
@@ -650,13 +646,13 @@ export class GameUI {
       const names = [...this.selected].map((id) => byId[id]?.name).filter(Boolean);
       const canCook = names.length >= 3 && validateCookSet(names, view.ruleSet).ok;
       return `
-        <div class="action-block stack">
-          <button type="button" class="btn primary big" data-act="confirm-cook" ${
-            canCook && !this._lastMeta?.actionsLocked ? "" : "disabled"
-          }>
-            料理する
-          </button>
-          <button type="button" class="btn ghost" data-act="skip-cook" ${lock}>料理しない</button>
+        <div class="action-block action-dock">
+          <div class="action-row">
+            <button type="button" class="btn primary" data-act="confirm-cook" ${
+              canCook && !this._lastMeta?.actionsLocked ? "" : "disabled"
+            }>料理する</button>
+            <button type="button" class="btn ghost" data-act="skip-cook" ${lock}>料理しない</button>
+          </div>
         </div>`;
     }
 
@@ -665,13 +661,12 @@ export class GameUI {
       const need = (me?.hand?.length || 0) - 3;
       const ready = this.selected.size === need;
       return `
-        <div class="action-block stack">
-          <p>手札を3枚にしてください（あと <strong>${need}</strong> 枚捨てる）</p>
-          <button type="button" class="btn primary big" data-act="confirm-end" ${
-            ready && !this._lastMeta?.actionsLocked ? "" : "disabled"
-          }>
-            捨ててターン終了
-          </button>
+        <div class="action-block action-dock">
+          <div class="action-row">
+            <button type="button" class="btn primary" data-act="confirm-end" ${
+              ready && !this._lastMeta?.actionsLocked ? "" : "disabled"
+            }>捨てて終了（あと${need}）</button>
+          </div>
         </div>`;
     }
     return "";

@@ -833,16 +833,47 @@ body.in-game #global-status {
 
 .decl-btns {
   display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem;
-  justify-content: center;
+  flex-wrap: nowrap;
+  gap: 0.35rem;
+  justify-content: stretch;
+  align-items: stretch;
   width: 100%;
 }
 
 .decl-btns .btn {
-  flex: 1 1 7.5rem;
+  flex: 1 1 0;
+  min-width: 0;
   min-height: 2.75rem;
+  padding: 0.45rem 0.3rem;
   font-weight: 800;
+  font-size: 0.85rem;
+}
+
+.decl-btns .btn-clear-sel,
+.action-row .btn-clear-sel {
+  flex: 0 0 2.5rem;
+  min-width: 2.5rem;
+  padding: 0.45rem 0.25rem;
+  font-size: 1.1rem;
+  font-weight: 700;
+}
+
+.action-dock {
+  width: 100%;
+}
+
+.action-dock .action-row {
+  width: 100%;
+}
+
+.action-dock .action-row .btn {
+  min-height: 2.75rem;
+}
+
+.action-dock-note {
+  margin: 0.25rem 0 0;
+  text-align: center;
+  font-size: 0.75rem;
 }
 
 .hint {
@@ -2156,18 +2187,53 @@ body.in-game #global-status {
     z-index: 25;
     background: linear-gradient(180deg, rgba(255, 248, 240, 0.92), #fff8f0 35%);
     border-top: 1px solid var(--line);
-    padding: 0.45rem 0.15rem max(0.55rem, env(safe-area-inset-bottom));
+    padding: 0.4rem 0.15rem max(0.45rem, env(safe-area-inset-bottom));
     box-shadow: 0 -6px 16px rgba(80, 40, 20, 0.06);
   }
 
-  .action-block .btn {
-    padding: 0.45rem 0.65rem;
+  .actions:has(.action-dock) {
+    /* Keep dock height stable across selection states (own turn) */
+    min-height: calc(3.55rem + env(safe-area-inset-bottom, 0px));
+  }
+
+  .actions .action-dock {
+    min-height: 2.75rem;
+  }
+
+  .actions .hint:not(.action-dock-note),
+  .actions .decl-label,
+  .actions .big-hint {
+    display: none;
+  }
+
+  .action-dock-note {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+  }
+
+  .decl-btns {
+    gap: 0.3rem;
+  }
+
+  .decl-btns .btn {
+    min-height: 2.75rem;
+    padding: 0.4rem 0.2rem;
+    font-size: 0.78rem;
+  }
+
+  .action-block .btn,
+  .action-row .btn {
+    padding: 0.45rem 0.5rem;
     font-size: 0.82rem;
+    min-height: 2.75rem;
   }
 
   .btn.big {
-    padding: 0.55rem 0.85rem;
-    font-size: 0.9rem;
+    padding: 0.45rem 0.65rem;
+    font-size: 0.85rem;
   }
 
   body.match-playing .log {
