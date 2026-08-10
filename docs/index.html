@@ -19,70 +19,83 @@
   <body>
     <p id="global-status" aria-live="polite"></p>
 
-    <main id="lobby">
-      <header class="hero">
-        <h1 class="hero-title">
-          <img src="assets/title.png" alt="THE NOODLES" class="title-logo" width="640" height="128" />
-        </h1>
-        <p class="hero-sub">カードでラーメンを組み立て、先に目標点を目指す対戦ゲーム</p>
-      </header>
+    <main id="lobby" class="lobby-stage">
+      <section class="lobby-visual" aria-label="タイトル">
+        <header class="hero">
+          <h1 class="hero-title">
+            <img src="assets/title.png" alt="THE NOODLES" class="title-logo" width="640" height="128" />
+          </h1>
+          <p class="hero-sub">カードでラーメンを組み立て、<br class="hero-sub-br" />先に目標点を目指す対戦ゲーム</p>
+        </header>
+        <div class="lobby-card-fan" aria-hidden="true">
+          <img class="lobby-fan-card" style="--i:0" src="assets/cards/noodle.png" alt="" />
+          <img class="lobby-fan-card" style="--i:1" src="assets/cards/pork.png" alt="" />
+          <img class="lobby-fan-card" style="--i:2" src="assets/cards/soy.png" alt="" />
+          <img class="lobby-fan-card" style="--i:3" src="assets/cards/green-onion.png" alt="" />
+          <img class="lobby-fan-card" style="--i:4" src="assets/cards/egg.png" alt="" />
+        </div>
+      </section>
 
-      <div class="lobby-card">
-        <label for="name-input">表示名</label>
-        <input id="name-input" type="text" maxlength="16" placeholder="あなたの名前" autocomplete="nickname" />
+      <section class="lobby-panel">
+        <div class="lobby-card">
+          <label for="name-input">表示名</label>
+          <input id="name-input" type="text" maxlength="16" placeholder="あなたの名前" autocomplete="nickname" />
 
-        <details class="lobby-details">
-          <summary>ルールセット <span class="details-summary-val">THE NOODLES</span></summary>
-          <fieldset class="rule-fieldset nested">
-            <label class="radio-row">
-              <input type="radio" name="rule-set" value="noodles" checked />
-              THE NOODLES（★あり/オリジナルルール）
-            </label>
-            <label class="radio-row">
-              <input type="radio" name="rule-set" value="classic" />
-              stir fly eighteen（★なし/本家ルール）
-            </label>
-          </fieldset>
-        </details>
+          <div class="lobby-settings">
+            <details class="lobby-details lobby-details-rules" open>
+              <summary>ルールセット <span class="details-summary-val">THE NOODLES</span></summary>
+              <fieldset class="rule-fieldset nested">
+                <label class="radio-row">
+                  <input type="radio" name="rule-set" value="noodles" checked />
+                  THE NOODLES（★あり/オリジナルルール）
+                </label>
+                <label class="radio-row">
+                  <input type="radio" name="rule-set" value="classic" />
+                  stir fly eighteen（★なし/本家ルール）
+                </label>
+              </fieldset>
+            </details>
 
-        <details class="lobby-details">
-          <summary>対戦設定 <span class="details-summary-val">50点・15秒</span></summary>
-          <fieldset class="rule-fieldset settings-fieldset nested">
-            <label for="win-score">目標ポイント（先取）</label>
-            <input id="win-score" type="number" min="20" max="100" step="5" value="50" />
-            <label for="taste-sec">味見の制限時間（秒・0＝制限なし）</label>
-            <input id="taste-sec" type="number" min="0" max="60" step="1" value="15" />
-            <label for="seat-count">オンライン人数（不足分は開始時にCPU）</label>
-            <select id="seat-count" aria-label="オンライン人数">
-              <option value="2">2人</option>
-              <option value="3">3人</option>
-              <option value="4" selected>4人</option>
-            </select>
-            <p class="settings-hint">ホスト／ソロ開始時に反映。デフォルトは50点・15秒・4人。0で味見制限なし。</p>
-          </fieldset>
-        </details>
-
-        <div class="btn-row">
-          <button type="button" class="btn primary" id="btn-host">部屋を作る（ホスト）</button>
-          <div class="join-row">
-            <input id="room-input" type="text" maxlength="8" placeholder="部屋コード" autocomplete="off" aria-label="部屋コード" />
-            <button type="button" class="btn" id="btn-join">部屋に参加</button>
+            <details class="lobby-details lobby-details-match" open>
+              <summary>対戦設定 <span class="details-summary-val">50点・15秒・2人</span></summary>
+              <fieldset class="rule-fieldset settings-fieldset nested lobby-settings-grid">
+                <div class="lobby-setting-cell">
+                  <label for="win-score">目標ポイント</label>
+                  <input id="win-score" type="number" min="20" max="100" step="5" value="50" title="先取" />
+                </div>
+                <div class="lobby-setting-cell">
+                  <label for="taste-sec">味見（秒）</label>
+                  <input id="taste-sec" type="number" min="0" max="60" step="1" value="15" title="0で制限なし" />
+                </div>
+                <div class="lobby-setting-cell lobby-setting-seats">
+                  <label for="seat-count">人数</label>
+                  <select id="seat-count" aria-label="人数">
+                    <option value="2" selected>2人</option>
+                    <option value="3">3人</option>
+                    <option value="4">4人</option>
+                  </select>
+                </div>
+                <p class="settings-hint">ホストとソロで同じ席数（不足分はCPU）。味見0＝制限なし。デフォルトは50点・15秒・2人。</p>
+              </fieldset>
+            </details>
           </div>
-          <div class="solo-row">
-            <label for="cpu-count" class="solo-row-label">CPU</label>
-            <select id="cpu-count" class="solo-cpu-select" aria-label="CPU人数">
-              <option value="1" selected>1</option>
-              <option value="2">2</option>
-              <option value="3">3</option>
-            </select>
-            <button type="button" class="btn" id="btn-solo">1人でプレイ</button>
-          </div>
-          <div class="lobby-guide-row">
-            <button type="button" class="btn ghost" id="btn-rules">ルール</button>
-            <button type="button" class="btn ghost" id="btn-effects">効果表</button>
+
+          <div class="btn-row">
+            <button type="button" class="btn primary" id="btn-host">部屋を作る（ホスト）</button>
+            <div class="btn-row-rest">
+              <div class="join-row">
+                <input id="room-input" type="text" maxlength="8" placeholder="部屋コード" autocomplete="off" aria-label="部屋コード" />
+                <button type="button" class="btn" id="btn-join">部屋に参加</button>
+              </div>
+              <button type="button" class="btn" id="btn-solo">1人でプレイ</button>
+              <div class="lobby-guide-row">
+                <button type="button" class="btn ghost" id="btn-rules">ルール</button>
+                <button type="button" class="btn ghost" id="btn-effects">効果表</button>
+              </div>
+            </div>
           </div>
         </div>
-      </div>
+      </section>
     </main>
 
     <div id="table" hidden></div>

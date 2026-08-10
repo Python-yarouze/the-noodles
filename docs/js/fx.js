@@ -48,26 +48,13 @@ export class FxLayer {
       case "draw": {
         const name = event.playerName || "プレイヤー";
         const n = event.count ?? 0;
-        if (event.turnStart) {
-          this._splash(`${name} のばん！`, "fx-start");
-          if (n > 0) {
-            setTimeout(() => this._toast(`${name} が ${n} 枚引いた`, "fx-toast-draw"), 500);
-          } else {
-            setTimeout(() => this._toast(`${name} は引けなかった`, "fx-toast-go"), 500);
-          }
-        } else if (n > 0) {
-          this._toast(`${name} が ${n} 枚引いた`, "fx-toast-draw");
-        }
+        // Turn/draw notices live in the field status panel — keep FX light.
+        if (event.turnStart) break;
+        if (n > 0) this._toast(`${name} が ${n} 枚引いた`, "fx-toast-draw");
         break;
       }
       case "discard_declare":
-        this._splash(
-          event.kind === "pair"
-            ? `${event.actorName || ""} ペアで伏せた！`.trim()
-            : `「${event.declaration}」と宣言！`,
-          "fx-declare"
-        );
-        setTimeout(() => this._toast("味見受付中…", "fx-toast-go"), 700);
+        // Declaration details are shown on the field mat center.
         break;
       case "taste_success":
         this._tasteResult(event, true);
@@ -81,35 +68,20 @@ export class FxLayer {
           "fx-toast-go"
         );
         break;
-      case "taste_all_passed":
-        this._toast("全員パス — 続行", "fx-toast-go");
-        break;
-      case "taste_timeout":
-        this._toast("時間切れ — 味見なしで続行", "fx-toast-go");
-        break;
       case "phase_cook":
-        this._toast(`${event.playerName || ""} 料理フェーズ`.trim(), "fx-toast-draw");
-        break;
       case "skip_cook":
-        this._toast(`${event.playerName || "相手"} は料理しなかった`, "fx-toast-go");
+      case "end_hand":
+      case "taste_all_passed":
+      case "taste_timeout":
+      case "cook_ack":
+      case "discard_resume":
+        // Shown in the field status panel instead of toast spam.
         break;
       case "cook":
       case "cook_win":
         this._cook(event);
         break;
-      case "cook_ack":
-        this._toast(
-          `確認 ${event.count ?? "?"}/${event.need ?? "?"}（${event.playerName || ""}）`,
-          "fx-toast-go"
-        );
-        break;
       case "cook_reveal_done":
-        if (event.next === "end_hand") {
-          this._toast("手札を3枚に整えてください", "fx-toast-draw");
-        }
-        break;
-      case "end_hand":
-        this._toast(`${event.playerName || ""} が手札を整えた`, "fx-toast-go");
         break;
       case "game_start":
         this._splash("スタート！", "fx-start");
@@ -179,50 +151,15 @@ export class FxLayer {
   _cook(event) {
     const points = Number(event.points) || 0;
     const isWin = event.type === "cook_win";
-    let tier = "t2";
-    if (isWin) tier = "win";
-    else if (points <= 10) tier = "t1";
-    else if (points <= 20) tier = "t2";
-    else if (points <= 30) tier = "t3";
-    else tier = "t4";
-
-    if (tier === "t1") {
-      this._toast(
-        `${event.playerName ? `${event.playerName} ` : ""}料理 +${points}点`.trim(),
-        "fx-toast-draw"
-      );
-      this._splash(`+${points}`, "fx-start");
+    // Field mat already shows the dish — keep FX light so it doesn't flash over the reveal UI.
+    const name = event.playerName ? `${event.playerName} ` : "";
+    if (isWin) {
+      this._toast(`${name}勝利料理！ +${points}点`.trim(), "fx-toast-draw");
+      this._confetti(64);
       return;
     }
-
-    const el = document.createElement("div");
-    el.className = `fx-cook fx-cook--${tier}`;
-    const names = (event.names || []).map((n) => escapeHtml(n)).join("・");
-    const chef = event.playerName ? `<p class="fx-cook-chef">${escapeHtml(event.playerName)}</p>` : "";
-    const title = isWin ? "勝利料理！" : "料理完成";
-    const burstCount = tier === "t3" ? 10 : tier === "t4" || tier === "win" ? 18 : 0;
-    const burst =
-      burstCount > 0
-        ? `<div class="fx-cook-burst">${Array.from({ length: burstCount }, (_, i) => {
-            const ang = (Math.PI * 2 * i) / burstCount;
-            const dist = 70 + (i % 3) * 28;
-            return `<i style="--i:${i};--dx:${Math.cos(ang) * dist}px;--dy:${Math.sin(ang) * dist}px"></i>`;
-          }).join("")}</div>`
-        : "";
-    el.innerHTML = `
-      ${burst}
-      <div class="fx-cook-inner">
-        <p class="fx-cook-title">${title}</p>
-        ${chef}
-        <p class="fx-cook-names">${names}</p>
-        <p class="fx-cook-points">+${points}<small>点</small></p>
-      </div>`;
-    this.layer.appendChild(el);
-    const ttl = tier === "t3" ? 2300 : tier === "t4" || tier === "win" ? 2800 : 2200;
-    setTimeout(() => el.remove(), ttl);
-
-    if (tier === "t4") this._confetti(42);
-    if (tier === "win") this._confetti(64);
+    this._toast(`${name}料理 +${points}点`.trim(), "fx-toast-draw");
+    if (points >= 30) this._confetti(28);
   }
 
   _confetti(count = 28) {

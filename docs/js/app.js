@@ -113,7 +113,7 @@ function showLobby(opts = {}) {
   lobbyEl.hidden = false;
   tableEl.hidden = true;
   tableEl.innerHTML = "";
-  document.body.classList.remove("in-game", "match-playing", "match-finished");
+  document.body.classList.remove("in-game", "match-playing", "match-finished", "match-waiting");
   document.body.classList.add("in-lobby");
   document.body.style.removeProperty("--turn-seat");
   setLobbyBusy(false);
@@ -177,14 +177,76 @@ function selectedRuleSet() {
   return el?.value === "classic" ? "classic" : "noodles";
 }
 
-function soloCpuCount() {
-  const n = Number(document.getElementById("cpu-count")?.value || 1);
-  return Math.min(MAX_PLAYERS - 1, Math.max(1, n));
-}
+const LOBBY_SETTINGS_KEY = "noodles.lobbySettings";
 
 function lobbySeatCount() {
-  const n = Number(document.getElementById("seat-count")?.value || 4);
+  const n = Number(document.getElementById("seat-count")?.value || 2);
   return Math.min(MAX_PLAYERS, Math.max(2, n));
+}
+
+function loadLobbySettings() {
+  try {
+    const raw = localStorage.getItem(LOBBY_SETTINGS_KEY);
+    if (!raw) return;
+    const data = JSON.parse(raw);
+    const rule = data.ruleSet === "classic" ? "classic" : "noodles";
+    const ruleEl = document.querySelector(`input[name="rule-set"][value="${rule}"]`);
+    if (ruleEl) ruleEl.checked = true;
+    const winEl = document.getElementById("win-score");
+    if (winEl && data.winScore != null) winEl.value = String(clampWinScore(data.winScore));
+    const tasteEl = document.getElementById("taste-sec");
+    if (tasteEl && data.tasteSec != null) {
+      const sec = Math.max(0, Math.min(60, Math.round(Number(data.tasteSec))));
+      tasteEl.value = String(Number.isFinite(sec) ? sec : 15);
+    }
+    const seatEl = document.getElementById("seat-count");
+    if (seatEl && data.seatCount != null) {
+      seatEl.value = String(lobbySeatCountFrom(data.seatCount));
+    }
+  } catch {
+    /* ignore */
+  }
+}
+
+function lobbySeatCountFrom(n) {
+  return Math.min(MAX_PLAYERS, Math.max(2, Number(n) || 2));
+}
+
+function saveLobbySettings() {
+  try {
+    const tasteSec = Number(document.getElementById("taste-sec")?.value ?? 15);
+    localStorage.setItem(
+      LOBBY_SETTINGS_KEY,
+      JSON.stringify({
+        ruleSet: selectedRuleSet(),
+        winScore: clampWinScore(document.getElementById("win-score")?.value || 50),
+        tasteSec: Number.isFinite(tasteSec) ? Math.max(0, Math.min(60, Math.round(tasteSec))) : 15,
+        seatCount: lobbySeatCount(),
+      })
+    );
+  } catch {
+    /* ignore */
+  }
+}
+
+function isLobbyNarrow() {
+  return window.matchMedia("(max-width: 640px)").matches;
+}
+
+function syncLobbyDetailsMode() {
+  const narrow = isLobbyNarrow();
+  document.querySelectorAll(".lobby-details").forEach((el) => {
+    // PC: must stay open — closed <details> content is inert even if forced visible via CSS
+    el.open = !narrow;
+  });
+}
+
+function bindLobbyDetailsMode() {
+  document.querySelectorAll(".lobby-details").forEach((el) => {
+    el.addEventListener("toggle", () => {
+      if (!isLobbyNarrow() && !el.open) el.open = true;
+    });
+  });
 }
 
 function lobbySettings() {
@@ -800,14 +862,14 @@ function startSolo() {
   try {
     destroyRoomOnly();
     const name = document.getElementById("name-input").value.trim() || "プレイヤー";
-    const cpuN = soloCpuCount();
+    const targetSeats = lobbySeatCount();
     role = "solo";
     myId = "local-0";
     roomId = "SOLO";
     actionBusy = false;
     game = new NoodlesGame();
     applyLobbySettings(game);
-    game.setTargetSeats(1 + cpuN);
+    game.setTargetSeats(targetSeats);
     bindGameChange();
     game.addPlayer("local-0", name);
     game.startGame();
@@ -850,12 +912,22 @@ lobbyHostConfirm?.addEventListener("click", (e) => {
 document.querySelectorAll('input[name="rule-set"]').forEach((el) => {
   el.addEventListener("change", () => {
     syncLobbySummary();
+    saveLobbySettings();
     if (lobbyEffectsModal && !lobbyEffectsModal.hidden) renderLobbyEffects();
   });
 });
-document.getElementById("win-score")?.addEventListener("input", syncLobbySummary);
-document.getElementById("taste-sec")?.addEventListener("input", syncLobbySummary);
-document.getElementById("seat-count")?.addEventListener("change", syncLobbySummary);
+document.getElementById("win-score")?.addEventListener("input", () => {
+  syncLobbySummary();
+  saveLobbySettings();
+});
+document.getElementById("taste-sec")?.addEventListener("input", () => {
+  syncLobbySummary();
+  saveLobbySettings();
+});
+document.getElementById("seat-count")?.addEventListener("change", () => {
+  syncLobbySummary();
+  saveLobbySettings();
+});
 
 function syncLobbySummary() {
   const ruleVal = document.querySelector(".lobby-details .details-summary-val");
@@ -871,6 +943,10 @@ function syncLobbySummary() {
   }
 }
 
+loadLobbySettings();
 syncLobbySummary();
+bindLobbyDetailsMode();
+syncLobbyDetailsMode();
+window.matchMedia("(max-width: 640px)").addEventListener("change", syncLobbyDetailsMode);
 
 showLobby();

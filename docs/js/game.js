@@ -44,6 +44,8 @@ export function createEmptyState() {
     phase: "draw",
     usedDiscard1: false,
     usedDiscard2: false,
+    /** How many discard declares completed this turn (max 2: single + pair). */
+    discardDeclareCount: 0,
     cookedThisTurn: false,
     drawFailed: false,
     pendingAction: null,
@@ -217,6 +219,7 @@ export class NoodlesGame {
   _beginTurn() {
     this.state.usedDiscard1 = false;
     this.state.usedDiscard2 = false;
+    this.state.discardDeclareCount = 0;
     this.state.cookedThisTurn = false;
     this.state.drawFailed = false;
     this.state.pendingAction = null;
@@ -315,6 +318,7 @@ export class NoodlesGame {
       tastePasses: [],
     };
     this.state.usedDiscard1 = true;
+    this.state.discardDeclareCount = (this.state.discardDeclareCount || 0) + 1;
     this.state.phase = "taste_window";
     this._armTasteWindow();
     this._log(`${p.name} が「${declaration}」を宣言して1枚伏せました`);
@@ -352,6 +356,7 @@ export class NoodlesGame {
       tastePasses: [],
     };
     this.state.usedDiscard2 = true;
+    this.state.discardDeclareCount = (this.state.discardDeclareCount || 0) + 1;
     this.state.phase = "taste_window";
     this._armTasteWindow();
     this._log(`${p.name} がペア（2枚）を宣言して伏せました`);
@@ -455,7 +460,7 @@ export class NoodlesGame {
       }
       this.state.pendingAction = null;
       this.state.tasteDeadline = null;
-      this.state.phase = "discard_draw";
+      this._enterCookOrDiscardDraw(actor);
       this._emit({
         type: "taste_success",
         tasterId: playerId,
@@ -529,7 +534,29 @@ export class NoodlesGame {
     this._log(`${actor.name} が ${got} 枚引きました（宣言: ${pending.declaration}）`);
     this.state.pendingAction = null;
     this.state.tasteDeadline = null;
-    this.state.phase = "discard_draw";
+    this._enterCookOrDiscardDraw(actor);
+  }
+
+  /** After a discard resolves (or is busted), continue discard phase or auto-advance to cook. */
+  _enterCookOrDiscardDraw(actor) {
+    const exhausted =
+      (this.state.discardDeclareCount || 0) >= 2 ||
+      (this.state.usedDiscard1 && this.state.usedDiscard2);
+    if (exhausted) {
+      this.state.phase = "cook";
+      this._log(`${actor.name} は捨てて引くを2回行ったので料理へ`);
+      this._emit({ type: "phase_cook", playerName: actor.name, playerIndex: this.state.turn });
+    } else {
+      this.state.phase = "discard_draw";
+      this._emit({
+        type: "discard_resume",
+        playerName: actor?.name,
+        playerIndex: this.state.turn,
+        usedDiscard1: this.state.usedDiscard1,
+        usedDiscard2: this.state.usedDiscard2,
+        discardDeclareCount: this.state.discardDeclareCount || 0,
+      });
+    }
   }
 
   skipDiscardPhase(playerId) {
@@ -748,6 +775,7 @@ export class NoodlesGame {
       phase: s.phase,
       usedDiscard1: s.usedDiscard1,
       usedDiscard2: s.usedDiscard2,
+      discardDeclareCount: s.discardDeclareCount || 0,
       cookedThisTurn: s.cookedThisTurn,
       tasteDeadline: s.tasteDeadline,
       cookRevealDeadline: s.cookRevealDeadline,

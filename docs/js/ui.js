@@ -8,7 +8,7 @@ import { getCardEffect, effectsByCategory } from "./card-effects.js";
 import { FxLayer, showAppToast } from "./fx.js";
 import { suggestImprovements, topCombinations, bestCooksFromHand } from "./helper.js";
 
-const SEAT_COLORS = ["#c45c26", "#2a7a6a", "#b8860b", "#5c6bc0"];
+const SEAT_COLORS = ["#c44b2f", "#2a7a6a", "#c9a227", "#5c6bc0"];
 const RULES_IMG = RULES_IMAGE;
 
 const LOCKED_UI_ACTS = new Set([
@@ -49,8 +49,10 @@ export class GameUI {
     this.fx = new FxLayer(root);
     this._lastPhase = null;
     this.showHelper = false;
+    this.showLog = false;
     this.helperTab = "cooks";
     this.refTab = null;
+    this._handScrollLeft = 0;
   }
 
   render(view, meta = {}) {
@@ -62,10 +64,15 @@ export class GameUI {
 
     document.body.classList.toggle("match-playing", view?.status === "playing");
     document.body.classList.toggle("match-finished", view?.status === "finished");
+    document.body.classList.toggle("match-waiting", !view || view.status === "waiting");
 
     if (view?.phase && view.phase !== this._lastPhase) {
       this.selected.clear();
+      this._handScrollLeft = 0;
       this._lastPhase = view.phase;
+    } else {
+      const prevHand = this.root.querySelector(".card-row.hand");
+      if (prevHand) this._handScrollLeft = prevHand.scrollLeft;
     }
 
     if (!view || view.status === "waiting") {
@@ -76,7 +83,7 @@ export class GameUI {
       const have = (view?.players || []).length;
       document.body.style.removeProperty("--turn-seat");
       this.root.innerHTML = `
-        <div class="panel waiting">
+        <div class="panel waiting wait-panel">
           <p class="status-line">${escapeHtml(connectionStatus || "参加者を待っています…")}</p>
           ${roomId ? `<p class="room-code">${escapeHtml(roomId)}</p>` : ""}
           <div class="wait-players">
@@ -90,17 +97,17 @@ export class GameUI {
           <p class="mode-badge">${escapeHtml(RULE_LABELS[view?.ruleSet] || "")}</p>
           <p class="hint">目標 ${goal}点 ／ ${tasteLabel}</p>
           <p class="hint">人数 ${have}/${target}（不足分は開始時にCPU）</p>
-          <div class="action-row" style="max-width:16rem;margin:0.75rem auto">
-            <button type="button" class="btn ghost" data-act="open-rules">ルール</button>
-            <button type="button" class="btn ghost" data-act="open-ref">効果表</button>
-          </div>
-          ${
-            canStart
-              ? `<button type="button" class="btn primary big" data-act="startGame" ${lock}>はじめる</button>`
-              : `<p class="hint">ホストが「はじめる」を押すと開始します</p>`
-          }
-          <div class="result-actions" style="margin-top:1rem">
-            <button type="button" class="btn ghost" data-act="lobby">ホームへ</button>
+          <div class="wait-actions">
+            ${
+              canStart
+                ? `<button type="button" class="btn primary big wait-start" data-act="startGame" ${lock}>はじめる</button>`
+                : `<p class="hint wait-start-hint">ホストが「はじめる」を押すと開始します</p>`
+            }
+            <div class="wait-guides">
+              <button type="button" class="btn ghost" data-act="open-rules">ルール</button>
+              <button type="button" class="btn ghost" data-act="open-ref">効果表</button>
+            </div>
+            <button type="button" class="btn ghost wait-home" data-act="lobby">ホームへ</button>
           </div>
         </div>
         ${this._overlaysHtml(view)}`;
@@ -128,8 +135,6 @@ export class GameUI {
                 : `<p class="hint">ホストが再戦できます</p>`
             }
             <button type="button" class="btn ${canRematch ? "ghost" : "primary"}" data-act="lobby">ホームへ</button>
-            <button type="button" class="btn ghost" data-act="open-rules">ルール</button>
-            <button type="button" class="btn ghost" data-act="open-ref">効果を見る</button>
           </div>
         </div>
         ${this._overlaysHtml(view)}`;
@@ -139,7 +144,6 @@ export class GameUI {
     }
 
     const me = view.myIndex >= 0 ? view.players[view.myIndex] : null;
-    const others = view.players.filter((_, i) => i !== view.myIndex);
     const myTurn = view.turn === view.myIndex;
     const turnColor = SEAT_COLORS[view.turn % 4];
     document.body.style.removeProperty("--turn-seat");
@@ -158,89 +162,261 @@ export class GameUI {
       myTurn &&
       (view.phase === "discard_draw" || view.phase === "cook" || view.phase === "end_hand");
 
+    // Patch cook reveal in place so CPU ack refreshes don't remount / flicker.
+    if (this._patchCookReveal(view, { lock })) {
+      if (view?.lastEvent) this.fx.play(view.lastEvent);
+      return;
+    }
+
     this.root.innerHTML = `
-      <div class="table-shell table-playing" style="--turn-seat:${turnColor}">
+      <div class="table-shell table-playing play-stage" style="--turn-seat:${turnColor}">
         ${this._disconnectBanner(connectionStatus, { role, canReconnect })}
         ${this._turnBanner(view, myTurn, role, roomId)}
 
-        <section class="scores">${this._scoreboard(view)}
-          <div class="goal">目標 ${view.winScore ?? WIN_SCORE}点</div>
+        <section class="seat-row" aria-label="プレイヤー">
+          ${view.players
+            .map((p, i) => this._seatChipHtml(p, i, view.turn === i, i === view.myIndex))
+            .join("")}
+          <div class="goal-chip">目標 <strong>${view.winScore ?? WIN_SCORE}</strong></div>
         </section>
 
-        <section class="opponent-zone">
-          <div class="opponents-row">
-            ${others
-              .map((opp) => {
-                const oi = view.players.indexOf(opp);
-                return `
-                <div class="opp-block" style="--seat:${SEAT_COLORS[oi % 4]}">
-                  <h3>${escapeHtml(opp.name)}${opp.isCpu ? " <small>CPU</small>" : ""} <small>×${opp.handCount}</small></h3>
-                  <div class="card-row backs">${cardBacks(opp.handCount || 0)}</div>
-                </div>`;
-              })
-              .join("")}
+        <section class="field-mat center-zone" aria-label="場">
+          <aside class="field-rail field-rail--tools" aria-label="ツール">
+            ${this._toolButtonsHtml()}
+          </aside>
+
+          <div class="field-mat-meta ${
+            view.phase === "cook_reveal" && view.lastCook
+              ? "is-reveal"
+              : view.pendingPublic || tasteOpen || (view.phase === "taste_window" && myTurn)
+                ? "is-busy"
+                : view.phase === "cook" && myTurn
+                  ? "is-cook"
+                  : "is-status"
+          }">
+            ${this._fieldMetaHtml(view, {
+              tasteOpen,
+              tastePassed,
+              passCount,
+              passNeed,
+              lock,
+              myTurn,
+              selectable,
+              me,
+            })}
           </div>
+
+          <aside class="field-rail field-rail--piles" aria-label="山札と捨て札">
+            <div class="piles piles--rail">
+              <div class="pile pile-deck">
+                <div class="pile-stack" aria-hidden="true">
+                  <span class="pile-layer" style="--i:0"></span>
+                  <span class="pile-layer" style="--i:1"></span>
+                  <span class="pile-layer" style="--i:2"></span>
+                </div>
+                <div class="pile-label">山札<strong>${view.deckCount}</strong></div>
+              </div>
+              <div class="pile pile-discard">
+                <div class="pile-stack pile-stack--face" aria-hidden="true">
+                  <span class="pile-layer is-face" style="--i:0"></span>
+                  <span class="pile-layer is-face" style="--i:1"></span>
+                </div>
+                <div class="pile-label">捨て札<strong>${view.discardCount}</strong></div>
+              </div>
+            </div>
+          </aside>
         </section>
 
-        <section class="center-zone">
-          <div class="piles">
-            <div class="pile pile-deck">山札<br><strong>${view.deckCount}</strong></div>
-            <div class="pile">捨て札<br><strong>${view.discardCount}</strong></div>
-          </div>
-          ${view.phase === "cook_reveal" && view.lastCook ? this._cookRevealHtml(view) : ""}
-          ${
-            view.pendingPublic
-              ? `<div class="pending pop">
-                  伏せ札：<strong>${escapeHtml(view.pendingPublic.declaration)}</strong>
-                  （${view.pendingPublic.cardCount}枚 → ${view.pendingPublic.drawCount}枚）
-                  ${view.tasteDeadline ? `<span class="timer" data-deadline="${view.tasteDeadline}"></span>` : ""}
-                </div>`
-              : ""
-          }
-          ${
-            tasteOpen
-              ? tastePassed
-                ? `<p class="hint big-hint">パス済み — 他の人の判断待ち（${passCount}/${passNeed}）</p>`
-                : `<div class="taste-actions">
-                  <button type="button" class="btn danger big taste-btn" data-act="taste" ${lock}>味見する</button>
-                  <button type="button" class="btn ghost" data-act="skipTaste" ${lock}>パス（味見しない）</button>
-                  <p class="hint">早いもの勝ち ／ パス ${passCount}/${passNeed}</p>
-                </div>`
-              : ""
-          }
-          ${
-            view.phase === "taste_window" && myTurn
-              ? `<p class="hint big-hint">相手の味見待ち…（パス ${passCount}/${passNeed}）</p>`
-              : ""
-          }
-        </section>
+        <div class="hand-dock">
+          <section class="hand-stage hand-zone">
+            <div class="hand-zone-head">
+              <div class="hand-stage-title">
+                <h3>てふだ</h3>
+                <span class="hand-count">${me?.hand?.length || 0}</span>
+                ${
+                  me
+                    ? `<span class="hand-my-score" style="--seat:${SEAT_COLORS[view.myIndex % 4]}">${me.score}<small>点</small></span>`
+                    : ""
+                }
+              </div>
+              <p class="hand-hint">${handHint(view, myTurn, selectable)}</p>
+            </div>
+            <div class="card-row hand">
+              ${(me?.hand || []).map((c) => this._handCardHtml(c)).join("")}
+            </div>
+          </section>
 
-        <section class="hand-zone">
-          <div class="hand-zone-head">
-            <h3>あなたのてふだ（${me?.hand?.length || 0}）</h3>
-            <p class="hand-hint">${handHint(view, myTurn, selectable)}</p>
-          </div>
-          <div class="card-row hand">
-            ${(me?.hand || []).map((c) => this._handCardHtml(c)).join("")}
-          </div>
-          ${view.phase === "cook" && myTurn ? this._cookPreviewHtml(me, view.ruleSet) : ""}
-        </section>
-
-        <section class="actions">
-          ${this._actionControls(view, myTurn)}
-        </section>
-
-        <section class="log">
-          <h3>ログ</h3>
-          <ul>${[...(view.log || [])].reverse().slice(0, 12).map((l) => `<li>${escapeHtml(l)}</li>`).join("")}</ul>
-        </section>
+          <section class="actions play-dock">
+            ${this._actionControls(view, myTurn)}
+          </section>
+        </div>
       </div>
       ${this._overlaysHtml(view)}
     `;
 
     this._bindAll();
+    this._restoreHandScroll();
     this._tickTimer();
     if (view?.lastEvent) this.fx.play(view.lastEvent);
+  }
+
+  _toolButtonsHtml() {
+    return `
+      <button type="button" class="btn ghost btn-tool" data-act="open-helper">お助け</button>
+      <button type="button" class="btn ghost btn-tool" data-act="open-rules">ルール</button>
+      <button type="button" class="btn ghost btn-tool" data-act="open-ref">効果表</button>
+      <button type="button" class="btn ghost btn-tool" data-act="open-log">ログ</button>`;
+  }
+
+  /** Update reveal ack UI without remounting the fan (avoids flash on CPU acks). */
+  _patchCookReveal(view, opts = {}) {
+    if (view?.status !== "playing" || view.phase !== "cook_reveal" || !view.lastCook) return false;
+    const el = this.root.querySelector(".cook-reveal");
+    if (!el) return false;
+
+    const ackCount = (view.cookAcks || []).length;
+    const need = view.players.length;
+    const ackHint = el.querySelector(".cook-reveal-ack");
+    if (ackHint) ackHint.textContent = `全員が確認すると続きます（${ackCount}/${need}）`;
+
+    const myId = view.players[view.myIndex]?.id;
+    const acked = (view.cookAcks || []).includes(myId);
+    const action = el.querySelector(".cook-reveal-action");
+    if (action && action.dataset.acked !== String(!!acked)) {
+      action.dataset.acked = String(!!acked);
+      const lock = opts.lock || "";
+      action.innerHTML = acked
+        ? `<p class="hint cook-reveal-acked">確認済み — 他の人を待っています</p>`
+        : `<button type="button" class="btn primary big" data-act="ackCookReveal" ${lock}>確認して次へ</button>`;
+      action.querySelectorAll("[data-act]").forEach((btn) => {
+        btn.addEventListener("click", (e) => {
+          e.stopPropagation();
+          this._handleAct(btn.getAttribute("data-act"), btn);
+        });
+      });
+    }
+
+    this.root.querySelectorAll(".seat-chip").forEach((chip, i) => {
+      const p = view.players[i];
+      if (!p) return;
+      const score = chip.querySelector(".seat-chip-score strong");
+      const hand = chip.querySelector(".seat-chip-hand");
+      if (score) score.textContent = String(p.score);
+      if (hand) hand.textContent = `×${p.handCount ?? p.hand?.length ?? 0}`;
+      chip.classList.toggle("is-turn", view.turn === i);
+      chip.classList.toggle("is-me", i === view.myIndex);
+    });
+
+    const handCount = this.root.querySelector(".hand-count");
+    const me = view.players[view.myIndex];
+    if (handCount && me) handCount.textContent = String(me.hand?.length || 0);
+    const myScore = this.root.querySelector(".hand-my-score");
+    if (myScore && me) {
+      myScore.innerHTML = `${me.score}<small>点</small>`;
+    }
+
+    return true;
+  }
+
+  _fieldMetaHtml(view, opts) {
+    const { tasteOpen, tastePassed, passCount, passNeed, lock, myTurn, selectable, me } = opts;
+    if (view.phase === "cook_reveal" && view.lastCook) {
+      return this._cookRevealHtml(view);
+    }
+    if (view.pendingPublic) {
+      return `
+        <div class="pending pop">
+          <span class="pending-decl">
+            伏せ札：<strong>${escapeHtml(view.pendingPublic.declaration)}</strong>
+            （${view.pendingPublic.cardCount}枚 → ${view.pendingPublic.drawCount}枚）
+          </span>
+          ${view.tasteDeadline ? `<span class="timer" data-deadline="${view.tasteDeadline}"></span>` : ""}
+        </div>
+        ${
+          tasteOpen
+            ? tastePassed
+              ? `<p class="hint big-hint">パス済み — 他の人の判断待ち（${passCount}/${passNeed}）</p>`
+              : `<div class="taste-actions">
+                  <button type="button" class="btn danger big taste-btn" data-act="taste" ${lock}>味見する</button>
+                  <button type="button" class="btn ghost" data-act="skipTaste" ${lock}>パス（味見しない）</button>
+                  <p class="hint">早いもの勝ち ／ パス ${passCount}/${passNeed}</p>
+                </div>`
+            : view.phase === "taste_window" && myTurn
+              ? `<p class="hint big-hint">相手の味見待ち…（パス ${passCount}/${passNeed}）</p>`
+              : ""
+        }`;
+    }
+    if (view.phase === "cook" && myTurn) {
+      return `
+        <div class="field-status">
+          <p class="field-status-phase">料理</p>
+          <p class="field-status-msg">${handHint(view, myTurn, selectable)}</p>
+        </div>
+        ${this._cookPreviewHtml(me, view.ruleSet)}`;
+    }
+    return this._fieldStatusHtml(view, myTurn, selectable);
+  }
+
+  _fieldStatusHtml(view, myTurn, selectable) {
+    const phase = PHASE_JP[view.phase] || view.phase;
+    const cur = view.players[view.turn];
+    const ev = view.lastEvent;
+    let eventLine = "";
+    if (ev?.type === "draw" && ev.turnStart) {
+      eventLine = `${escapeHtml(ev.playerName || cur?.name || "")} のばん`;
+      if (ev.count > 0) eventLine += ` — ${ev.count}枚ドロー`;
+    } else if (ev?.type === "discard_declare") {
+      eventLine =
+        ev.kind === "pair"
+          ? `${escapeHtml(ev.actorName || "")} がペアで伏せた`
+          : `${escapeHtml(ev.actorName || "")}「${escapeHtml(ev.declaration || "")}」と宣言`;
+    } else if (ev?.type === "phase_cook") {
+      eventLine = `${escapeHtml(ev.playerName || "")} の料理フェーズ`;
+    } else if (ev?.type === "discard_resume") {
+      eventLine = "捨てて引くを続行";
+    } else if (ev?.type === "skip_cook") {
+      eventLine = `${escapeHtml(ev.playerName || "相手")} は料理しなかった`;
+    } else if (ev?.type === "taste_all_passed" || ev?.type === "taste_timeout") {
+      eventLine = ev.type === "taste_timeout" ? "時間切れ — 味見なしで続行" : "全員パス — 続行";
+    } else if (ev?.type === "end_hand") {
+      eventLine = `${escapeHtml(ev.playerName || "")} が手札を整えた`;
+    }
+
+    const msg = myTurn
+      ? handHint(view, myTurn, selectable) || "手札を選んで操作しよう"
+      : `${escapeHtml(cur?.name || "相手")} の手番です`;
+
+    const limits = [];
+    if (view.phase === "discard_draw" && myTurn) {
+      if (view.usedDiscard1) limits.push("1枚捨て使用済み");
+      if (view.usedDiscard2) limits.push("2枚捨て使用済み");
+    }
+
+    return `
+      <div class="field-status">
+        <p class="field-status-phase">${escapeHtml(phase)}</p>
+        ${eventLine ? `<p class="field-status-event">${eventLine}</p>` : ""}
+        <p class="field-status-msg">${msg}</p>
+        ${
+          limits.length
+            ? `<p class="field-status-limits">${limits.map(escapeHtml).join(" ／ ")}</p>`
+            : ""
+        }
+      </div>`;
+  }
+
+  _seatChipHtml(player, index, isTurn, isMe) {
+    const handCount = player.handCount ?? player.hand?.length ?? 0;
+    return `
+      <div class="seat-chip ${isTurn ? "is-turn" : ""} ${isMe ? "is-me" : ""}" style="--seat:${SEAT_COLORS[index % 4]}">
+        <span class="seat-chip-name">
+          ${escapeHtml(player.name)}
+          ${player.isCpu ? `<small>CPU</small>` : ""}
+          ${isMe ? `<small>あなた</small>` : ""}
+        </span>
+        <span class="seat-chip-score"><strong>${player.score}</strong></span>
+        <span class="seat-chip-hand">×${handCount}</span>
+      </div>`;
   }
 
   _cookRevealHtml(view) {
@@ -249,32 +425,34 @@ export class GameUI {
     const ackCount = (view.cookAcks || []).length;
     const need = view.players.length;
     return `
-      <div class="cook-reveal">
+      <div class="cook-reveal ${dish.won ? "is-win" : ""}">
         <p class="cook-reveal-label">完成した料理</p>
         <h3 class="cook-reveal-chef">${escapeHtml(dish.playerName)} の一品</h3>
         <div class="cook-reveal-cards">
           ${(dish.names || [])
             .map(
-              (n) =>
-                `<div class="cook-reveal-card"><img src="${cardImagePath(n)}" alt="${escapeHtml(n)}" /></div>`
+              (n, i, arr) =>
+                `<button type="button" class="cook-reveal-card" style="--i:${i};--n:${arr.length}" aria-label="${escapeHtml(n)}"><img src="${cardImagePath(n)}" alt="${escapeHtml(n)}" /></button>`
             )
             .join("")}
         </div>
         <p class="cook-reveal-points">+${dish.points} 点 <small>（合計 ${dish.score}）</small></p>
         ${dish.won ? `<p class="cook-reveal-win">勝利条件達成！</p>` : ""}
-        <p class="hint">全員が確認すると続きます（${ackCount}/${need}）</p>
+        <p class="hint cook-reveal-ack">全員が確認すると続きます（${ackCount}/${need}）</p>
         ${
           view.cookRevealDeadline
             ? `<p class="hint cook-reveal-auto">自動で進みます（<span class="timer" data-deadline="${view.cookRevealDeadline}"></span>）</p>`
             : ""
         }
+        <div class="cook-reveal-action">
         ${
           acked
-            ? `<p class="hint">確認済み — 他の人を待っています</p>`
+            ? `<p class="hint cook-reveal-acked">確認済み — 他の人を待っています</p>`
             : `<button type="button" class="btn primary big" data-act="ackCookReveal" ${
                 this._lastMeta?.actionsLocked ? "disabled" : ""
               }>確認して次へ</button>`
         }
+        </div>
       </div>`;
   }
 
@@ -322,10 +500,8 @@ export class GameUI {
           ${roomChip}
           ${waitingCpu}
         </div>
-        <div class="turn-tools">
-          <button type="button" class="btn ghost btn-tool" data-act="open-helper">お助け</button>
-          <button type="button" class="btn ghost btn-tool" data-act="open-rules">ルール</button>
-          <button type="button" class="btn ghost btn-tool" data-act="open-ref">効果表</button>
+        <div class="turn-tools turn-tools--mobile">
+          ${this._toolButtonsHtml()}
         </div>
       </div>`;
   }
@@ -444,8 +620,27 @@ export class GameUI {
       ${this.showHelper ? this._helperPanelHtml(view) : ""}
       ${this.showRules ? this._rulesPanelHtml() : ""}
       ${this.showReference ? this._referencePanelHtml(view?.ruleSet || "noodles") : ""}
+      ${this.showLog ? this._logPanelHtml(view) : ""}
       ${this.detailName ? this._detailModalHtml(this.detailName, view?.ruleSet || "noodles") : ""}
     `;
+  }
+
+  _logPanelHtml(view) {
+    const lines = [...(view?.log || [])].reverse().slice(0, 40);
+    return `
+      <div class="modal-backdrop" data-act="close-log">
+        <div class="modal log-modal" onclick="event.stopPropagation()">
+          <header class="ref-header">
+            <h2>ログ</h2>
+            <button type="button" class="modal-close" data-act="close-log">×</button>
+          </header>
+          ${
+            lines.length
+              ? `<ul class="log-modal-list">${lines.map((l) => `<li>${escapeHtml(l)}</li>`).join("")}</ul>`
+              : `<p class="hint log-modal-empty">まだログはありません</p>`
+          }
+        </div>
+      </div>`;
   }
 
   _rulesPanelHtml() {
@@ -746,14 +941,16 @@ export class GameUI {
 
   _actionControls(view, myTurn) {
     const lock = this._lastMeta?.actionsLocked ? "disabled" : "";
+    const wrap = (inner) => `<div class="action-block action-dock">${inner}</div>`;
+
     if (view.phase === "cook_reveal") {
-      return `<p class="hint">上の完成料理を確認してください</p>`;
+      return wrap(`<p class="hint action-dock-status">上の完成料理を確認してください</p>`);
     }
     if (!myTurn) {
-      return `<p class="hint big-hint">相手の手番です</p>`;
+      return wrap(`<p class="hint action-dock-status">相手の手番です</p>`);
     }
     if (view.phase === "taste_window") {
-      return `<p class="hint">味見の結果待ち…</p>`;
+      return wrap(`<p class="hint action-dock-status">味見の結果待ち…</p>`);
     }
 
     if (view.phase === "discard_draw") {
@@ -762,36 +959,28 @@ export class GameUI {
       const blocked2 = view.usedDiscard2;
       const dis1 = blocked1 || this._lastMeta?.actionsLocked ? "disabled" : "";
       if (n === 0) {
-        return `
-          <div class="action-block action-dock">
+        return wrap(`
             <div class="action-row">
               <button type="button" class="btn primary" data-act="skip-discard" ${lock}>このまま料理へ</button>
               <button type="button" class="btn ghost" data-act="skip-all-cook" ${lock}>料理しない</button>
-            </div>
-          </div>`;
+            </div>`);
       }
       if (n === 1) {
-        return `
-          <div class="action-block action-dock">
+        return wrap(`
             <div class="decl-btns">
               <button type="button" class="btn danger" data-act="confirm-single" data-decl="とり" ${dis1}>とり×2</button>
               <button type="button" class="btn danger" data-act="confirm-single" data-decl="ぶた" ${dis1}>ぶた×3</button>
               <button type="button" class="btn danger" data-act="confirm-single" data-decl="えび" ${dis1}>えび×4</button>
               <button type="button" class="btn ghost btn-clear-sel" data-act="clear-sel" title="選択をクリア">×</button>
-            </div>
-            ${blocked1 ? `<p class="hint action-dock-note">1枚捨て使用済み</p>` : ""}
-          </div>`;
+            </div>`);
       }
-      return `
-        <div class="action-block action-dock">
+      return wrap(`
           <div class="action-row">
             <button type="button" class="btn danger" data-act="confirm-pair" ${
               blocked2 || this._lastMeta?.actionsLocked ? "disabled" : ""
             }>ペア伏せ（×3）</button>
             <button type="button" class="btn ghost btn-clear-sel" data-act="clear-sel" title="選択をクリア">×</button>
-          </div>
-          ${blocked2 ? `<p class="hint action-dock-note">2枚捨て使用済み</p>` : ""}
-        </div>`;
+          </div>`);
     }
 
     if (view.phase === "cook") {
@@ -799,31 +988,27 @@ export class GameUI {
       const byId = Object.fromEntries((me?.hand || []).map((c) => [c.id, c]));
       const names = [...this.selected].map((id) => byId[id]?.name).filter(Boolean);
       const canCook = names.length >= 3 && validateCookSet(names, view.ruleSet).ok;
-      return `
-        <div class="action-block action-dock">
+      return wrap(`
           <div class="action-row">
             <button type="button" class="btn primary" data-act="confirm-cook" ${
               canCook && !this._lastMeta?.actionsLocked ? "" : "disabled"
             }>料理する</button>
             <button type="button" class="btn ghost" data-act="skip-cook" ${lock}>料理しない</button>
-          </div>
-        </div>`;
+          </div>`);
     }
 
     if (view.phase === "end_hand") {
       const me = view.players[view.myIndex];
       const need = (me?.hand?.length || 0) - 3;
       const ready = this.selected.size === need;
-      return `
-        <div class="action-block action-dock">
+      return wrap(`
           <div class="action-row">
             <button type="button" class="btn primary" data-act="confirm-end" ${
               ready && !this._lastMeta?.actionsLocked ? "" : "disabled"
             }>捨てて終了（あと${need}）</button>
-          </div>
-        </div>`;
+          </div>`);
     }
-    return "";
+    return wrap(`<p class="hint action-dock-status">操作を待っています</p>`);
   }
 
   _bindAll() {
@@ -840,6 +1025,86 @@ export class GameUI {
         this._handleAct(btn.getAttribute("data-act"), btn);
       });
     });
+    const hand = this.root.querySelector(".card-row.hand");
+    if (hand) {
+      hand.addEventListener(
+        "scroll",
+        () => {
+          this._handScrollLeft = hand.scrollLeft;
+        },
+        { passive: true }
+      );
+    }
+    this._bindCookRevealFan();
+  }
+
+  _bindCookRevealFan() {
+    const root = this.root.querySelector(".cook-reveal-cards");
+    if (!root) return;
+    const cards = [...root.querySelectorAll(".cook-reveal-card")];
+    let lockUntil = 0;
+
+    const setFocus = (index) => {
+      root.classList.add("is-focusing");
+      root.style.setProperty("--focus", String(index));
+      cards.forEach((c, i) => c.classList.toggle("is-focus", i === index));
+      // Block retargeting while cards slide under the finger.
+      root.classList.add("is-settling");
+      lockUntil = Date.now() + 320;
+      clearTimeout(root._fanSettleTimer);
+      root._fanSettleTimer = setTimeout(() => {
+        root.classList.remove("is-settling");
+      }, 320);
+    };
+
+    const clearFocus = () => {
+      root.classList.remove("is-focusing", "is-settling");
+      root.style.removeProperty("--focus");
+      cards.forEach((c) => c.classList.remove("is-focus"));
+      clearTimeout(root._fanSettleTimer);
+    };
+
+    cards.forEach((card, i) => {
+      card.addEventListener("pointerenter", (e) => {
+        if (e.pointerType !== "mouse") return;
+        setFocus(i);
+      });
+
+      // Touch/pen: decide on pointerdown using this card's index (not pointerup hit-test).
+      card.addEventListener("pointerdown", (e) => {
+        if (e.pointerType === "mouse") return;
+        e.preventDefault();
+        e.stopPropagation();
+        if (Date.now() < lockUntil) return;
+        const cur = root.style.getPropertyValue("--focus").trim();
+        if (root.classList.contains("is-focusing") && cur === String(i)) clearFocus();
+        else setFocus(i);
+      });
+
+      card.addEventListener("click", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+      });
+    });
+
+    root.addEventListener("pointerleave", (e) => {
+      if (e.pointerType === "mouse") clearFocus();
+    });
+
+    const reveal = root.closest(".cook-reveal");
+    if (reveal) {
+      reveal.addEventListener("pointerdown", (e) => {
+        if (e.pointerType === "mouse") return;
+        if (Date.now() < lockUntil) return;
+        if (!e.target.closest(".cook-reveal-card")) clearFocus();
+      });
+    }
+  }
+
+  _restoreHandScroll() {
+    const hand = this.root.querySelector(".card-row.hand");
+    if (!hand) return;
+    hand.scrollLeft = this._handScrollLeft || 0;
   }
 
   _onCardClick(el) {
@@ -914,6 +1179,14 @@ export class GameUI {
         break;
       case "close-helper":
         this.showHelper = false;
+        this.render(view, this._lastMeta);
+        break;
+      case "open-log":
+        this.showLog = true;
+        this.render(view, this._lastMeta);
+        break;
+      case "close-log":
+        this.showLog = false;
         this.render(view, this._lastMeta);
         break;
       case "helper-tab": {
@@ -1011,7 +1284,7 @@ export class GameUI {
       const deadline = Number(el.getAttribute("data-deadline"));
       const tick = () => {
         const left = Math.max(0, Math.ceil((deadline - Date.now()) / 1000));
-        el.textContent = `のこり ${left} びょう`;
+        el.textContent = `あと ${left} 秒`;
         if (left > 0 && this.root.contains(el)) setTimeout(tick, 200);
       };
       tick();
