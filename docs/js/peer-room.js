@@ -7,11 +7,42 @@ const GUEST_CONNECT_TIMEOUT_MS = 20000;
 const PENDING_MAX_MS = 20000;
 const FALLBACK_ICE_SERVERS = [{ urls: "stun:stun.l.google.com:19302" }];
 
+const LINE_HINT =
+  "この回線ではつながりにくいことがあります。別のWi-Fiを試すか、時間をおいてやり直してください";
+
 export function makeRoomCode() {
   const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
   let s = "";
   for (let i = 0; i < 6; i++) s += chars[Math.floor(Math.random() * chars.length)];
   return s;
+}
+
+export function friendlyPeerError(err) {
+  const type = err?.type || "";
+  switch (type) {
+    case "peer-unavailable":
+      return "部屋が見つかりません。コードと、ホストがゲーム画面を開いているかを確認してください";
+    case "unavailable-id":
+      return "その部屋は使えません。もう一度部屋を作ってください";
+    case "network":
+    case "disconnected":
+    case "socket-closed":
+      return "通信が不安定です。つなぎ直しています…";
+    case "browser-incompatible":
+      return "このブラウザではオンライン対戦できません。別のブラウザを試してください";
+    case "server-error":
+    case "socket-error":
+      return "接続サーバーに問題があります。時間をおいてやり直してください";
+    default:
+      if (err?.message === "guest connect timeout") {
+        return "接続がタイムアウトしました。ホストがゲーム画面を開いているか確認し、モバイル回線や別Wi-Fiを試してください";
+      }
+      return "つながりませんでした。コードを確認するか、別のWi-Fiを試してください";
+  }
+}
+
+export function isRoomMissingError(err) {
+  return err?.type === "peer-unavailable";
 }
 
 async function loadTurnCredentialsUrl() {
@@ -26,7 +57,6 @@ async function loadTurnCredentialsUrl() {
 async function fetchIceServers(onStatus) {
   const url = await loadTurnCredentialsUrl();
   if (!url || url.includes("YOUR_API_KEY")) {
-    onStatus?.("TURN未設定 — STUNのみで接続を試行");
     return FALLBACK_ICE_SERVERS;
   }
   try {
@@ -39,14 +69,14 @@ async function fetchIceServers(onStatus) {
     return iceServers;
   } catch (e) {
     console.warn("TURN credentials fetch failed", e);
-    onStatus?.("TURN取得失敗 — STUNのみで接続を試行");
+    onStatus?.(LINE_HINT);
     return FALLBACK_ICE_SERVERS;
   }
 }
 
 export class PeerRoom {
   /**
-   * @param {{ role: 'host'|'guest', roomId?: string, onMessage: (msg:any, meta?: {peerId?:string})=>void, onStatus: (s:string)=>void, onPeerClose?: (peerId:string)=>void, maxGuests?: number }} opts
+   * @param {{ role: 'host'|'guest', roomId?: string, onMessage: (msg:any, meta?: {peerId?:string})=>void, onStatus: (s:string)=>void, onPeerClose?: (peerId:string)=>void, onConnClose?: ()=>void, maxGuests?: number }} opts
    */
   constructor(opts) {
     this.role = opts.role;
@@ -54,6 +84,7 @@ export class PeerRoom {
     this.onMessage = opts.onMessage;
     this.onStatus = opts.onStatus;
     this.onPeerClose = opts.onPeerClose || null;
+    this.onConnClose = opts.onConnClose || null;
     this.maxGuests = opts.maxGuests ?? 3;
     this.peer = null;
     /** @type {Map<string, any>} peerId -> DataConnection */
@@ -64,6 +95,8 @@ export class PeerRoom {
     this.pendingSince = new Map();
     this.conn = null;
     this.connected = false;
+    this._connecting = null;
+    this._dead = false;
   }
 
   totalSeats() {
@@ -99,6 +132,10 @@ export class PeerRoom {
       /* ignore */
     }
     return true;
+  }
+
+  hasLiveConn(peerId) {
+    return this._isConnAlive(this.conns.get(peerId));
   }
 
   /** Drop zombie / stale connections so sleep-reconnect can reclaim slots. */
@@ -144,8 +181,16 @@ export class PeerRoom {
   }
 
   async connect() {
+    if (this._connecting) return this._connecting;
+    this._connecting = this._connect().finally(() => {
+      this._connecting = null;
+    });
+    return this._connecting;
+  }
+
+  async _connect() {
     if (typeof Peer === "undefined") {
-      this.onStatus("PeerJS の読み込みに失敗しました");
+      this.onStatus("通信の準備に失敗しました。ページを再読み込みしてください");
       throw new Error("PeerJS missing");
     }
 
@@ -181,14 +226,14 @@ export class PeerRoom {
           window.setTimeout(() => {
             if (settled || this.connected) return;
             this.onStatus(
-              "接続がタイムアウトしました。このネットワークではつながりにくいことがあります（モバイル回線や別Wi-Fiを試してください）"
+              "接続がタイムアウトしました。ホストがゲーム画面を開いているか確認し、モバイル回線や別Wi-Fiを試してください"
             );
             try {
               this.conn?.close();
             } catch (_) {
               /* ignore */
             }
-            fail(new Error("guest connect timeout"));
+            fail(Object.assign(new Error("guest connect timeout"), { type: "timeout" }));
           }, GUEST_CONNECT_TIMEOUT_MS);
         } else {
           ok(this.roomId);
@@ -230,12 +275,14 @@ export class PeerRoom {
       });
 
       this.peer.on("error", (err) => {
-        this.onStatus(`Peer エラー: ${err.type || err.message || err}`);
+        if (this._dead) return;
+        this.onStatus(friendlyPeerError(err));
         fail(err);
       });
 
       this.peer.on("disconnected", () => {
-        this.onStatus("シグナリングから切断。再接続を試行…");
+        if (this._dead || !this.peer || this.peer.destroyed) return;
+        this.onStatus("通信が不安定です。つなぎ直しています…");
         try {
           this.peer.reconnect();
         } catch (_) {
@@ -243,6 +290,43 @@ export class PeerRoom {
         }
       });
     });
+  }
+
+  /**
+   * Reclaim the same room Peer ID after the tab returns to the foreground.
+   * Does not treat backgrounding as room end.
+   */
+  async resumeHost() {
+    if (this.role !== "host") return false;
+    this._pruneDeadConns();
+    if (this.peer && !this.peer.destroyed) {
+      if (this.peer.disconnected) {
+        try {
+          this.peer.reconnect();
+          this.onStatus("通信が不安定です。つなぎ直しています…");
+          return true;
+        } catch (e) {
+          console.warn("peer.reconnect failed", e);
+        }
+      } else {
+        return true;
+      }
+    }
+
+    try {
+      this._dead = true;
+      this.peer?.destroy();
+    } catch (_) {
+      /* ignore */
+    }
+    this._dead = false;
+    this.peer = null;
+    this.conns.clear();
+    this.pendingPeers.clear();
+    this.pendingSince.clear();
+    this.connected = false;
+    await this.connect();
+    return true;
   }
 
   _bindHostConn(conn) {
@@ -275,7 +359,7 @@ export class PeerRoom {
   _bindConn(conn, resolve, reject) {
     conn.on("open", () => {
       this.connected = true;
-      this.onStatus("P2P 接続完了");
+      this.onStatus("つながりました");
       resolve(this.roomId);
     });
     conn.on("data", (data) => {
@@ -287,10 +371,11 @@ export class PeerRoom {
     });
     conn.on("close", () => {
       this.connected = false;
-      this.onStatus("ホストとの接続が切れました。ホストが閉じた部屋は再開できません");
+      this.onStatus("接続が切れました。同じ部屋なら再接続できます");
+      this.onConnClose?.();
     });
     conn.on("error", (err) => {
-      this.onStatus(`接続エラー: ${err.message || err}`);
+      this.onStatus(friendlyPeerError(err));
       reject(err);
     });
   }
@@ -328,13 +413,18 @@ export class PeerRoom {
   }
 
   destroy() {
+    this._dead = true;
+    this.onStatus = () => {};
+    this.onMessage = () => {};
+    this.onPeerClose = null;
+    this.onConnClose = null;
     try {
       for (const c of this.conns.values()) c.close();
       this.conns.clear();
       this.pendingPeers.clear();
       this.pendingSince.clear();
       if (this.conn) this.conn.close();
-      if (this.peer) this.peer.destroy();
+      if (this.peer && !this.peer.destroyed) this.peer.destroy();
     } catch (_) {
       /* ignore */
     }

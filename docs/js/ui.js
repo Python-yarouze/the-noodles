@@ -58,8 +58,15 @@ export class GameUI {
   render(view, meta = {}) {
     this.lastView = view;
     this._lastMeta = meta;
-    const { connectionStatus = "", role = "", roomId = "", canStart = false, actionsLocked = false, canReconnect = false } =
-      meta;
+    const {
+      connectionStatus = "",
+      role = "",
+      roomId = "",
+      canStart = false,
+      actionsLocked = false,
+      canReconnect = false,
+      disconnectKind = "",
+    } = meta;
     const lock = actionsLocked ? "disabled" : "";
 
     document.body.classList.toggle("match-playing", view?.status === "playing");
@@ -82,10 +89,21 @@ export class GameUI {
       const target = view?.targetSeats ?? meta.targetSeats ?? 4;
       const have = (view?.players || []).length;
       document.body.style.removeProperty("--turn-seat");
+      const showDisconnect = disconnectKind === "guest-drop" || disconnectKind === "host-ended";
       this.root.innerHTML = `
         <div class="panel waiting wait-panel">
-          <p class="status-line">${escapeHtml(connectionStatus || "参加者を待っています…")}</p>
-          ${roomId ? `<p class="room-code">${escapeHtml(roomId)}</p>` : ""}
+          ${
+            showDisconnect
+              ? this._disconnectBanner(connectionStatus, { role, canReconnect, disconnectKind })
+              : `<p class="status-line">${escapeHtml(connectionStatus || "参加者を待っています…")}</p>`
+          }
+          ${roomId ? this._roomCodeBlock(roomId, { canShare: typeof navigator !== "undefined" && typeof navigator.share === "function" }) : ""}
+          ${
+            role === "host"
+              ? `<p class="host-room-note">このタブを閉じると部屋は終わります</p>
+          <p class="host-room-note">コードをSNSに貼るときは、貼ったらすぐこの画面に戻ってください（裏に回しているあいだ、相手は入れません）</p>`
+              : ""
+          }
           <div class="wait-players">
             ${(view?.players || [])
               .map(
@@ -123,7 +141,7 @@ export class GameUI {
       document.body.style.removeProperty("--turn-seat");
       this.root.innerHTML = `
         <div class="panel finished result-panel">
-          ${this._disconnectBanner(connectionStatus, { role, canReconnect })}
+          ${this._disconnectBanner(connectionStatus, { role, canReconnect, disconnectKind })}
           <h2>${escapeHtml(winner?.name || "？")} の勝利</h2>
           <p class="result-sub">${goal}点先取</p>
           ${this._resultScoreboard(view)}
@@ -170,7 +188,8 @@ export class GameUI {
 
     this.root.innerHTML = `
       <div class="table-shell table-playing play-stage" style="--turn-seat:${turnColor}">
-        ${this._disconnectBanner(connectionStatus, { role, canReconnect })}
+        ${this._disconnectBanner(connectionStatus, { role, canReconnect, disconnectKind })}
+        ${this._reconnectWaitBanner(view, meta)}
         ${this._turnBanner(view, myTurn, role, roomId)}
 
         <section class="seat-row" aria-label="プレイヤー">
@@ -271,6 +290,8 @@ export class GameUI {
   /** Update reveal ack UI without remounting the fan (avoids flash on CPU acks). */
   _patchCookReveal(view, opts = {}) {
     if (view?.status !== "playing" || view.phase !== "cook_reveal" || !view.lastCook) return false;
+    const waits = this._lastMeta?.disconnectWaits || view?.disconnectWaits || [];
+    if (waits.length || this._lastMeta?.disconnectKind) return false;
     const el = this.root.querySelector(".cook-reveal");
     if (!el) return false;
 
@@ -412,6 +433,7 @@ export class GameUI {
         <span class="seat-chip-name">
           ${escapeHtml(player.name)}
           ${player.isCpu ? `<small>CPU</small>` : ""}
+          ${player.awaitingReconnect ? `<small>切断</small>` : ""}
           ${isMe ? `<small>あなた</small>` : ""}
         </span>
         <span class="seat-chip-score"><strong>${player.score}</strong></span>
@@ -456,15 +478,80 @@ export class GameUI {
       </div>`;
   }
 
+  _roomCodeBlock(roomId, { canShare = false } = {}) {
+    return `
+      <div class="room-code-row">
+        <p class="room-code">${escapeHtml(roomId)}</p>
+        <div class="room-code-actions">
+          <button type="button" class="btn ghost room-copy-btn" data-act="copy-room">コピー</button>
+          ${canShare ? `<button type="button" class="btn ghost room-copy-btn" data-act="share-room">共有</button>` : ""}
+        </div>
+      </div>`;
+  }
+
+  _reconnectWaitBanner(view, meta = {}) {
+    const waits = meta.disconnectWaits || view?.disconnectWaits || [];
+    if (!waits.length) return "";
+    const isHost = meta.role === "host";
+    return waits
+      .map((w) => {
+        const name = escapeHtml(w.name || "ゲスト");
+        const pid = escapeHtml(w.playerId || "");
+        if (w.mode === "hold") {
+          return `
+            <div class="reconnect-wait-banner" role="status">
+              <div class="reconnect-wait-text">
+                <p><strong>${name}</strong> の再入室を待っています</p>
+                <p class="reconnect-wait-note">この席の番では進みません</p>
+              </div>
+              ${
+                isHost
+                  ? `<div class="reconnect-wait-actions">
+                <button type="button" class="btn primary" data-act="cpu-takeover" data-player="${pid}">CPUに任せる</button>
+              </div>`
+                  : ""
+              }
+            </div>`;
+        }
+        const deadline = Number(w.deadline) || 0;
+        return `
+          <div class="reconnect-wait-banner" role="status">
+            <div class="reconnect-wait-text">
+              <p><strong>${name}</strong> が切断 — 再接続待ち <span class="timer" data-deadline="${deadline}"></span></p>
+            </div>
+            ${
+              isHost
+                ? `<div class="reconnect-wait-actions">
+              <button type="button" class="btn ghost" data-act="hold-reconnect" data-player="${pid}">再入室を待つ</button>
+              <button type="button" class="btn" data-act="cpu-takeover" data-player="${pid}">CPUに任せる</button>
+            </div>`
+                : ""
+            }
+          </div>`;
+      })
+      .join("");
+  }
+
   _disconnectBanner(connectionStatus, opts = {}) {
-    if (!connectionStatus) return "";
-    const { role = "", canReconnect = false } = opts;
-    const showReconnect = role === "guest" && canReconnect;
+    const { role = "", canReconnect = false, disconnectKind = "" } = opts;
+    if (role !== "guest") return "";
+    if (disconnectKind !== "guest-drop" && disconnectKind !== "host-ended") return "";
+
+    const hostEnded = disconnectKind === "host-ended";
+    const text = hostEnded
+      ? connectionStatus || "ホストが部屋を終了しました。この部屋には戻れません"
+      : connectionStatus || "接続が切れました。同じ部屋なら再接続できます";
+    const showReconnect = !hostEnded && canReconnect;
+
     return `
       <div class="disconnect-banner" role="alert">
         <div class="disconnect-banner-text">
-          <p>${escapeHtml(connectionStatus)}</p>
-          <p class="disconnect-banner-note">ホストが閉じた部屋は再開できません</p>
+          <p>${escapeHtml(text)}</p>
+          ${
+            hostEnded
+              ? `<p class="disconnect-banner-note">ホストが閉じた部屋は再開できません</p>`
+              : ""
+          }
         </div>
         <div class="disconnect-banner-actions">
           ${
@@ -1155,6 +1242,18 @@ export class GameUI {
       case "lobby":
         this.onAction("lobby", {});
         break;
+      case "copy-room":
+        copyRoomCode(this._lastMeta?.roomId || this.lastView?.roomId);
+        break;
+      case "share-room":
+        shareRoomCode(this._lastMeta?.roomId || this.lastView?.roomId);
+        break;
+      case "hold-reconnect":
+        this.onAction("holdReconnect", { playerId: btn?.getAttribute("data-player") });
+        break;
+      case "cpu-takeover":
+        this.onAction("cpuTakeover", { playerId: btn?.getAttribute("data-player") });
+        break;
       case "reconnect":
         this.onAction("reconnect", {});
         break;
@@ -1311,4 +1410,52 @@ function escapeHtml(s) {
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;");
+}
+
+async function copyRoomCode(roomId) {
+  const text = String(roomId || "").trim();
+  if (!text) {
+    showAppToast("部屋コードがありません");
+    return;
+  }
+  let ok = false;
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text);
+      ok = true;
+    }
+  } catch {
+    ok = false;
+  }
+  if (!ok) {
+    try {
+      const ta = document.createElement("textarea");
+      ta.value = text;
+      ta.setAttribute("readonly", "");
+      ta.style.position = "fixed";
+      ta.style.left = "-9999px";
+      document.body.appendChild(ta);
+      ta.select();
+      ok = document.execCommand("copy");
+      ta.remove();
+    } catch {
+      ok = false;
+    }
+  }
+  showAppToast(ok ? "コピーしたよ。貼ったらこの画面に戻ってね" : "コピーできませんでした");
+}
+
+async function shareRoomCode(roomId) {
+  const text = String(roomId || "").trim();
+  if (!text) {
+    showAppToast("部屋コードがありません");
+    return;
+  }
+  try {
+    await navigator.share({ text: `THE NOODLES の部屋コード: ${text}` });
+    showAppToast("共有したらこの画面に戻ってね");
+  } catch (err) {
+    if (err?.name === "AbortError") return;
+    copyRoomCode(text);
+  }
 }

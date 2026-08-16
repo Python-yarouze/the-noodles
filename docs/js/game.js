@@ -27,6 +27,7 @@ function emptyPlayer(id, name, opts = {}) {
     score: 0,
     nextTurnBonusDraw: 0,
     isCpu: !!opts.isCpu,
+    awaitingReconnect: false,
   };
 }
 
@@ -69,6 +70,9 @@ export class NoodlesGame {
     this.state = createEmptyState();
     this._tasteTimer = null;
     this._cookRevealTimer = null;
+    this._actionTimersPaused = false;
+    this._pausedTasteRemain = null;
+    this._pausedCookRemain = null;
     this.onChange = null;
   }
 
@@ -158,6 +162,76 @@ export class NoodlesGame {
     return { ok: true, name: p.name };
   }
 
+  /** Mid-game: let CPU play this human seat, or give the seat back. Keeps id/hand/score. */
+  setCpu(playerId, isCpu) {
+    const p = this.state.players.find((x) => x.id === playerId);
+    if (!p) return { ok: false, reason: "見つかりません" };
+    if (this.state.status === "waiting") {
+      return { ok: false, reason: "開始前はCPUに切り替えません" };
+    }
+    const next = !!isCpu;
+    if (p.isCpu === next) {
+      p.awaitingReconnect = false;
+      this._emit();
+      return { ok: true };
+    }
+    p.isCpu = next;
+    p.awaitingReconnect = false;
+    this._log(next ? `${p.name} の席をCPUが代理します` : `${p.name} が席に戻りました`);
+    this._emit();
+    return { ok: true };
+  }
+
+  setAwaitingReconnect(playerId, awaiting) {
+    const p = this.state.players.find((x) => x.id === playerId);
+    if (!p) return { ok: false, reason: "見つかりません" };
+    p.awaitingReconnect = !!awaiting;
+    this._emit();
+    return { ok: true };
+  }
+
+  pauseActionTimers() {
+    if (this._actionTimersPaused) return;
+    this._actionTimersPaused = true;
+    this._pausedTasteRemain =
+      this.state.tasteDeadline != null ? Math.max(0, this.state.tasteDeadline - Date.now()) : null;
+    this._pausedCookRemain =
+      this.state.cookRevealDeadline != null
+        ? Math.max(0, this.state.cookRevealDeadline - Date.now())
+        : null;
+    this._clearTasteTimer();
+    this._clearCookRevealTimer();
+    this.state.tasteDeadline = null;
+    this.state.cookRevealDeadline = null;
+    this._emit();
+  }
+
+  resumeActionTimers() {
+    if (!this._actionTimersPaused) return;
+    this._actionTimersPaused = false;
+    if (
+      this.state.phase === "taste_window" &&
+      this.state.tasteWindowMs &&
+      this._pausedTasteRemain != null
+    ) {
+      this.state.tasteDeadline = Date.now() + this._pausedTasteRemain;
+      this._startTasteTimer();
+    }
+    if (this.state.phase === "cook_reveal" && this._pausedCookRemain != null) {
+      const remain = this._pausedCookRemain;
+      this.state.cookRevealDeadline = Date.now() + remain;
+      this._cookRevealTimer = setTimeout(() => {
+        this._cookRevealTimer = null;
+        if (this.state.phase !== "cook_reveal") return;
+        this._log("料理確認の時間切れ — 自動で次へ");
+        this._finishCookReveal();
+      }, remain + 30);
+    }
+    this._pausedTasteRemain = null;
+    this._pausedCookRemain = null;
+    this._emit();
+  }
+
   /** Fill empty target seats with CPUs before dealing. */
   fillCpuSeats() {
     if (this.state.status !== "waiting") return { ok: false };
@@ -186,6 +260,9 @@ export class NoodlesGame {
     }
     this._clearTasteTimer();
     this._clearCookRevealTimer();
+    this._actionTimersPaused = false;
+    this._pausedTasteRemain = null;
+    this._pausedCookRemain = null;
     this.state.players = shuffle(this.state.players);
     this.state.deck = buildDeck(this.state.ruleSet);
     this.state.discardPile = [];
@@ -197,6 +274,7 @@ export class NoodlesGame {
       p.hand = [];
       p.score = 0;
       p.nextTurnBonusDraw = 0;
+      p.awaitingReconnect = false;
     }
     for (let i = 0; i < START_HAND; i++) {
       for (const p of this.state.players) {
@@ -807,6 +885,7 @@ export class NoodlesGame {
         hand: i === myIndex ? p.hand : null,
         nextTurnBonusDraw: p.nextTurnBonusDraw,
         isCpu: !!p.isCpu,
+        awaitingReconnect: !!p.awaitingReconnect,
       })),
     };
   }

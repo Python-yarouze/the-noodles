@@ -3,7 +3,7 @@
  */
 
 import { NoodlesGame } from "./game.js";
-import { PeerRoom } from "./peer-room.js";
+import { PeerRoom, friendlyPeerError, isRoomMissingError } from "./peer-room.js";
 import { GameUI } from "./ui.js";
 import { decideCpuAction } from "./ai.js";
 import { showAppToast } from "./fx.js";
@@ -52,6 +52,19 @@ let cpuBusy = false;
 let lobbyBusy = false;
 let actionBusy = false;
 
+const RECONNECT_GRACE_MS = 40000;
+const HOST_BG_RECOVER_MS = 5000;
+
+/** @type {"" | "guest-drop" | "host-ended"} */
+let disconnectKind = "";
+let hostEnded = false;
+let hostRecoverUntil = 0;
+/** @type {Map<string, { playerId: string, name: string, mode: "grace"|"hold", deadline: number|null, timerId: number|null }>} */
+let disconnectWaits = new Map();
+/** @type {Set<string>} */
+let deferredPeerCloses = new Set();
+let deferredCloseTimer = null;
+
 function seatStorageKey(id) {
   return `noodles:seat:${id}`;
 }
@@ -98,6 +111,10 @@ function setLobbyBusy(busy) {
 function destroyRoomOnly() {
   if (room) {
     try {
+      room.onStatus = () => {};
+      room.onMessage = () => {};
+      room.onConnClose = null;
+      room.onPeerClose = null;
       room.destroy();
     } catch (_) {
       /* ignore */
@@ -132,6 +149,8 @@ function showTable() {
 
 function destroySession() {
   clearCpuTimer();
+  clearDisconnectWaits();
+  clearDeferredPeerCloses();
   destroyRoomOnly();
   game = null;
   ui = null;
@@ -141,7 +160,12 @@ function destroySession() {
   peerToPlayer = new Map();
   cpuBusy = false;
   actionBusy = false;
+  disconnectKind = "";
+  hostEnded = false;
+  hostRecoverUntil = 0;
+  connectionStatus = "";
   window.__lastGuestView = null;
+  window.__disconnectWaits = null;
 }
 
 function clearCpuTimer() {
@@ -266,11 +290,156 @@ function applyLobbySettings(g) {
 
 function bindGameChange() {
   if (!game) return;
-  game.onChange = () => refresh();
+  game.onChange = () => {
+    syncReconnectPause();
+    refresh();
+  };
 }
 
 function canGuestReconnect() {
-  return role === "guest" && !!roomId && !!loadSeat(roomId);
+  return (
+    role === "guest" &&
+    !!roomId &&
+    !!loadSeat(roomId) &&
+    !hostEnded &&
+    disconnectKind !== "host-ended"
+  );
+}
+
+function serializeDisconnectWaits() {
+  return [...disconnectWaits.values()].map((w) => ({
+    playerId: w.playerId,
+    name: w.name,
+    mode: w.mode,
+    deadline: w.deadline,
+  }));
+}
+
+function isHostRecovering() {
+  return Date.now() < hostRecoverUntil || document.visibilityState === "hidden";
+}
+
+function clearDeferredPeerCloses() {
+  if (deferredCloseTimer) {
+    clearTimeout(deferredCloseTimer);
+    deferredCloseTimer = null;
+  }
+  deferredPeerCloses = new Set();
+}
+
+function clearDisconnectWaits() {
+  for (const w of disconnectWaits.values()) {
+    if (w.timerId) clearTimeout(w.timerId);
+  }
+  disconnectWaits = new Map();
+  game?.resumeActionTimers?.();
+}
+
+function syncReconnectPause() {
+  if (!game) return;
+  const holds = [...disconnectWaits.values()].filter((w) => w.mode === "hold");
+  if (!holds.length) {
+    game.resumeActionTimers();
+    return;
+  }
+  const phase = game.state.phase;
+  const turnId = game.state.players[game.state.turn]?.id;
+  const pending = game.state.pendingAction;
+  const needsPause = holds.some((w) => {
+    if (turnId === w.playerId) return true;
+    if (phase === "taste_window" && pending) {
+      const actorId = game.state.players[pending.actorIndex]?.id;
+      if (actorId === w.playerId) return false;
+      return !(pending.tastePasses || []).includes(w.playerId);
+    }
+    if (phase === "cook_reveal") {
+      return !(game.state.cookAcks || []).includes(w.playerId);
+    }
+    return false;
+  });
+  if (needsPause) game.pauseActionTimers();
+  else game.resumeActionTimers();
+}
+
+function playerStillConnected(playerId) {
+  for (const pid of peerToPlayer.values()) {
+    if (pid === playerId) return true;
+  }
+  return false;
+}
+
+function startGraceWait(playerId, name) {
+  if (!playerId || disconnectWaits.has(playerId)) return;
+  const deadline = Date.now() + RECONNECT_GRACE_MS;
+  const entry = {
+    playerId,
+    name: name || "ゲスト",
+    mode: "grace",
+    deadline,
+    timerId: window.setTimeout(() => {
+      const current = disconnectWaits.get(playerId);
+      if (!current || current.mode !== "grace") return;
+      convertSeatToCpu(playerId);
+    }, RECONNECT_GRACE_MS),
+  };
+  disconnectWaits.set(playerId, entry);
+  game?.setAwaitingReconnect?.(playerId, true);
+  syncReconnectPause();
+  refresh();
+}
+
+function holdReconnect(playerId) {
+  const w = disconnectWaits.get(playerId);
+  if (!w) return;
+  if (w.timerId) {
+    clearTimeout(w.timerId);
+    w.timerId = null;
+  }
+  w.mode = "hold";
+  w.deadline = null;
+  game?.setAwaitingReconnect?.(playerId, true);
+  syncReconnectPause();
+  refresh();
+}
+
+function convertSeatToCpu(playerId) {
+  const w = disconnectWaits.get(playerId);
+  if (w?.timerId) clearTimeout(w.timerId);
+  disconnectWaits.delete(playerId);
+  if (!game) return;
+  const p = game.state.players.find((x) => x.id === playerId);
+  if (!p || p.isCpu) {
+    syncReconnectPause();
+    refresh();
+    return;
+  }
+  game.setCpu(playerId, true);
+  syncReconnectPause();
+  showAppToast(`${p.name} の席をCPUが代理します`);
+  refresh();
+}
+
+function reclaimHumanSeat(playerId) {
+  const w = disconnectWaits.get(playerId);
+  if (w?.timerId) clearTimeout(w.timerId);
+  disconnectWaits.delete(playerId);
+  if (!game) return;
+  const p = game.state.players.find((x) => x.id === playerId);
+  if (p?.isCpu) game.setCpu(playerId, false);
+  else game.setAwaitingReconnect?.(playerId, false);
+  syncReconnectPause();
+}
+
+function markHostEnded(message) {
+  hostEnded = true;
+  disconnectKind = "host-ended";
+  setStatus(message || "ホストが部屋を終了しました。この部屋には戻れません");
+}
+
+function onGuestConnClose() {
+  if (hostEnded) return;
+  disconnectKind = "guest-drop";
+  setStatus("接続が切れました。同じ部屋なら再接続できます");
 }
 
 function refresh() {
@@ -283,6 +452,8 @@ function refresh() {
     isHost: role === "host",
     actionsLocked: actionBusy,
     canReconnect: canGuestReconnect(),
+    disconnectKind,
+    disconnectWaits: serializeDisconnectWaits(),
     canStart: role === "host" && game && game.state.status === "waiting" && game.state.players.length >= 1,
     targetSeats: target,
   };
@@ -306,7 +477,10 @@ function refresh() {
 
   if (role === "guest") {
     if (window.__lastGuestView) {
-      ui.render(window.__lastGuestView, meta);
+      ui.render(
+        { ...window.__lastGuestView, disconnectWaits: window.__disconnectWaits || [] },
+        meta
+      );
     } else {
       ui.render({ status: "waiting", players: [], log: [], ruleSet: "noodles" }, meta);
     }
@@ -349,10 +523,11 @@ function runCpuStep() {
 function broadcastViews() {
   if (role !== "host" || !room || !game) return;
   room.pruneDeadConns?.();
+  const waits = serializeDisconnectWaits();
   room.sendEach((peerId) => {
     const pid = peerToPlayer.get(peerId);
     if (!pid || pid === myId) return null;
-    return { type: "state", view: game.viewFor(pid) };
+    return { type: "state", view: game.viewFor(pid), disconnectWaits: waits };
   });
 }
 
@@ -365,7 +540,11 @@ function sendJoined(peerId, playerId) {
     winScore: game.state.winScore,
     tasteWindowMs: game.state.tasteWindowMs,
   });
-  room.sendToPeer(peerId, { type: "state", view: game.viewFor(playerId) });
+  room.sendToPeer(peerId, {
+    type: "state",
+    view: game.viewFor(playerId),
+    disconnectWaits: serializeDisconnectWaits(),
+  });
 }
 
 function handleHostAction(playerId, type, payload, { skipRefresh = false, skipActionLock = false } = {}) {
@@ -452,7 +631,7 @@ function rematch() {
 
   try {
     const humans = game.state.players
-      .filter((p) => !p.isCpu)
+      .filter((p) => !String(p.id).startsWith("cpu-"))
       .map((p) => ({
         id: p.id,
         name: p.name,
@@ -464,6 +643,7 @@ function rematch() {
     const targetSeats = game.state.targetSeats || MAX_PLAYERS;
 
     clearCpuTimer();
+    clearDisconnectWaits();
     cpuBusy = false;
     game = new NoodlesGame();
     game.setRuleSet(ruleSet);
@@ -478,6 +658,12 @@ function rematch() {
       showAppToast(started.reason || "再戦を開始できませんでした");
     } else {
       connectionStatus = "";
+      if (role === "host") {
+        for (const p of humans) {
+          if (p.id === myId) continue;
+          if (!playerStillConnected(p.id)) startGraceWait(p.id, p.name);
+        }
+      }
     }
   } finally {
     actionBusy = false;
@@ -487,12 +673,29 @@ function rematch() {
 
 function handleUiAction(type, payload) {
   if (type === "lobby") {
+    if (role === "host" && room) {
+      try {
+        room.send({ type: "room-closed" });
+      } catch (_) {
+        /* ignore */
+      }
+    }
     showLobby();
     return;
   }
 
   if (type === "reconnect") {
     reconnectGuest();
+    return;
+  }
+
+  if (type === "holdReconnect") {
+    if (role === "host" && payload?.playerId) holdReconnect(payload.playerId);
+    return;
+  }
+
+  if (type === "cpuTakeover") {
+    if (role === "host" && payload?.playerId) convertSeatToCpu(payload.playerId);
     return;
   }
 
@@ -512,6 +715,7 @@ function handleUiAction(type, payload) {
     const sent = room?.send({ type: "action", action: type, payload, playerId: myId });
     if (!sent) {
       actionBusy = false;
+      disconnectKind = "guest-drop";
       setStatus("送信できません。再接続してください");
     }
     return;
@@ -529,9 +733,47 @@ function handleUiAction(type, payload) {
 
 function onHostPeerClose(peerId) {
   if (role !== "host" || !game) return;
+  if (isHostRecovering()) {
+    deferredPeerCloses.add(peerId);
+    scheduleDeferredCloseFlush();
+    return;
+  }
+  applyHostPeerClose(peerId);
+}
+
+function scheduleDeferredCloseFlush() {
+  if (deferredCloseTimer) clearTimeout(deferredCloseTimer);
+  const wait = Math.max(HOST_BG_RECOVER_MS, hostRecoverUntil - Date.now());
+  deferredCloseTimer = window.setTimeout(() => {
+    deferredCloseTimer = null;
+    flushDeferredPeerCloses();
+  }, wait);
+}
+
+function flushDeferredPeerCloses() {
+  if (document.visibilityState === "hidden") {
+    scheduleDeferredCloseFlush();
+    return;
+  }
+  for (const peerId of [...deferredPeerCloses]) {
+    if (room?.hasLiveConn?.(peerId)) {
+      deferredPeerCloses.delete(peerId);
+      continue;
+    }
+    deferredPeerCloses.delete(peerId);
+    applyHostPeerClose(peerId);
+  }
+}
+
+function applyHostPeerClose(peerId) {
+  if (role !== "host" || !game) return;
   const pid = peerToPlayer.get(peerId);
   peerToPlayer.delete(peerId);
-  if (!pid) {
+  if (!pid || pid === myId) {
+    refresh();
+    return;
+  }
+  if (playerStillConnected(pid)) {
     refresh();
     return;
   }
@@ -542,7 +784,28 @@ function onHostPeerClose(peerId) {
     setStatus(`${name} が退室しました`);
     return;
   }
-  setStatus(`${name} が切断（再接続待ち）`);
+  if (player?.isCpu) {
+    refresh();
+    return;
+  }
+  startGraceWait(pid, name);
+}
+
+async function onHostVisibility() {
+  if (role !== "host" || !room) return;
+  if (document.visibilityState === "hidden") {
+    return;
+  }
+  hostRecoverUntil = Date.now() + HOST_BG_RECOVER_MS;
+  try {
+    await room.resumeHost();
+  } catch (e) {
+    console.warn("host resume failed", e);
+    setStatus(friendlyPeerError(e));
+  }
+  room.pruneDeadConns?.();
+  scheduleDeferredCloseFlush();
+  refresh();
 }
 
 function onPeerMessage(msg, meta = {}) {
@@ -555,9 +818,10 @@ function onPeerMessage(msg, meta = {}) {
         return;
       }
 
-      const existing = game.state.players.some((p) => p.id === msg.playerId);
+      const existing = game.state.players.find((p) => p.id === msg.playerId);
       if (existing) {
         if (meta.peerId) peerToPlayer.set(meta.peerId, msg.playerId);
+        reclaimHumanSeat(msg.playerId);
         sendJoined(meta.peerId, msg.playerId);
         if (game.state.status === "playing" || game.state.status === "finished") {
           connectionStatus = "";
@@ -596,11 +860,17 @@ function onPeerMessage(msg, meta = {}) {
   }
 
   if (role === "guest") {
+    if (msg.type === "room-closed") {
+      markHostEnded();
+      return;
+    }
     if (msg.type === "state") {
       window.__lastGuestView = msg.view;
+      window.__disconnectWaits = msg.disconnectWaits || [];
       actionBusy = false;
       if (msg.view?.status === "playing" || msg.view?.status === "finished") {
         connectionStatus = "";
+        disconnectKind = disconnectKind === "host-ended" ? disconnectKind : "";
         syncGlobalStatus();
       }
       refresh();
@@ -622,6 +892,7 @@ function onPeerMessage(msg, meta = {}) {
         const name = document.getElementById("name-input")?.value.trim() || "ゲスト";
         saveSeat(roomId, myId, name);
       }
+      if (disconnectKind !== "host-ended") disconnectKind = "";
       setStatus("部屋に参加しました。ホストの開始を待っています");
     }
   }
@@ -676,6 +947,8 @@ async function confirmAndCreateHost() {
   game.addPlayer(myId, name);
   peerToPlayer = new Map();
   actionBusy = false;
+  disconnectKind = "";
+  hostEnded = false;
 
   room = new PeerRoom({
     role: "host",
@@ -691,7 +964,7 @@ async function confirmAndCreateHost() {
     setStatus(`部屋 ${roomId} — ${seats}人部屋（不足分は開始時にCPU）`);
   } catch (e) {
     console.error(e);
-    showAppToast("部屋の作成に失敗しました");
+    showAppToast(friendlyPeerError(e) || "部屋の作成に失敗しました");
     showLobby({ clearSeat: false });
   } finally {
     setLobbyBusy(false);
@@ -778,13 +1051,17 @@ async function startGuest() {
   const joinName = saved?.name || name;
   const isRejoin = !!saved?.playerId;
   actionBusy = false;
+  disconnectKind = "";
+  hostEnded = false;
   window.__lastGuestView = null;
+  window.__disconnectWaits = null;
 
   room = new PeerRoom({
     role: "guest",
     roomId: code,
     onMessage: onPeerMessage,
     onStatus: setStatus,
+    onConnClose: onGuestConnClose,
   });
 
   try {
@@ -797,6 +1074,7 @@ async function startGuest() {
       name: joinName,
     });
     if (!sent) {
+      disconnectKind = "guest-drop";
       setStatus("送信できません。再接続してください");
     } else {
       setStatus(
@@ -805,7 +1083,7 @@ async function startGuest() {
     }
   } catch (e) {
     console.error(e);
-    showAppToast("部屋への接続に失敗しました");
+    showAppToast(friendlyPeerError(e) || "部屋への接続に失敗しました");
     showLobby({ clearSeat: false });
   } finally {
     setLobbyBusy(false);
@@ -814,6 +1092,10 @@ async function startGuest() {
 
 async function reconnectGuest() {
   if (role !== "guest" || !roomId || lobbyBusy) return;
+  if (hostEnded || disconnectKind === "host-ended") {
+    markHostEnded();
+    return;
+  }
   const code = roomId;
   const saved = loadSeat(code);
   if (!saved?.playerId) {
@@ -832,6 +1114,7 @@ async function reconnectGuest() {
     roomId: code,
     onMessage: onPeerMessage,
     onStatus: setStatus,
+    onConnClose: onGuestConnClose,
   });
 
   try {
@@ -842,14 +1125,21 @@ async function reconnectGuest() {
       name: joinName,
     });
     if (!sent) {
+      disconnectKind = "guest-drop";
       setStatus("送信できません。再接続してください");
     } else {
+      disconnectKind = "";
       connectionStatus = "";
       setStatus("再接続しました。同期待ち…");
     }
   } catch (e) {
     console.error(e);
-    setStatus("再接続に失敗しました。ホストが閉じた部屋は再開できません");
+    if (isRoomMissingError(e)) {
+      markHostEnded("ホストが部屋を終了しました。この部屋には戻れません");
+    } else {
+      disconnectKind = "guest-drop";
+      setStatus(friendlyPeerError(e));
+    }
   } finally {
     setLobbyBusy(false);
     refresh();
@@ -948,5 +1238,8 @@ syncLobbySummary();
 bindLobbyDetailsMode();
 syncLobbyDetailsMode();
 window.matchMedia("(max-width: 640px)").addEventListener("change", syncLobbyDetailsMode);
+document.addEventListener("visibilitychange", () => {
+  onHostVisibility();
+});
 
 showLobby();
