@@ -1821,7 +1821,66 @@ body.match-playing .table-playing .turn-banner {
 }
 
 .log-modal-list li {
-  margin: 0.2rem 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  margin: 0.4rem 0;
+}
+
+.log-entry-text {
+  display: block;
+}
+
+.log-card-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  align-items: center;
+  margin-top: 0.15rem;
+}
+
+.log-card-row .mini-card,
+.log-card-row .mini-card--back {
+  width: 36px;
+  height: 50px;
+  object-fit: cover;
+  border-radius: 4px;
+  border: 1px solid var(--line);
+  flex-shrink: 0;
+}
+
+.log-card-row .mini-card--back::after {
+  font-size: 1.1rem;
+}
+
+.mini-card--back {
+  display: inline-block;
+  box-sizing: border-box;
+  background: repeating-linear-gradient(
+    -45deg,
+    #d8d4cc,
+    #d8d4cc 2px,
+    #c8c4bc 2px,
+    #c8c4bc 4px
+  );
+  position: relative;
+}
+
+.mini-card--back::after {
+  content: "?";
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.85em;
+  font-weight: 800;
+  color: #6a6458;
+}
+
+.field-status-cards {
+  justify-content: center;
+  margin: 0.15rem 0 0.25rem;
 }
 
 .log-modal-empty {
@@ -2778,6 +2837,23 @@ body.match-finished #table {
 
 .fx-taste-real {
   color: var(--mint);
+  margin-bottom: 0.25rem;
+}
+
+.fx-taste-real-cards {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  justify-content: center;
+  margin: 0 0 0.15rem;
+}
+
+.fx-taste-card-img {
+  width: 36px;
+  height: 50px;
+  object-fit: cover;
+  border-radius: 4px;
+  border: 1px solid var(--line);
 }
 
 .fx-taste-penalty {

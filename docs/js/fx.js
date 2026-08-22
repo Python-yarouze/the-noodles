@@ -2,6 +2,8 @@
  * Visual FX overlays — cook splash, taste result, score pop, confetti.
  */
 
+import { cardImagePath } from "./deck.js";
+
 const SEAT_COLORS = ["#c45c26", "#2a7a6a", "#b8860b", "#5c6bc0"];
 
 /** Toast usable from lobby or table (body-mounted). */
@@ -110,6 +112,17 @@ export class FxLayer {
     setTimeout(() => el.remove(), 1800);
   }
 
+  _tasteRealCardsHtml(names) {
+    const cards = (names || [])
+      .map(
+        (n) =>
+          `<img src="${cardImagePath(n)}" alt="${escapeHtml(n)}" class="fx-taste-card-img" title="${escapeHtml(n)}" />`
+      )
+      .join("");
+    if (!cards) return "";
+    return `<p class="fx-taste-real">本当の札：</p><div class="fx-taste-real-cards">${cards}</div>`;
+  }
+
   _tasteResult(event, success) {
     const seat = SEAT_COLORS[(event.tasterIndex ?? 0) % 4];
     const taster = escapeHtml(event.tasterName || "？");
@@ -117,9 +130,9 @@ export class FxLayer {
     const el = document.createElement("div");
     el.className = `fx-splash fx-taste-card ${success ? "fx-taste-win" : "fx-taste-lose"}`;
     el.style.setProperty("--seat", seat);
+    const realCards = this._tasteRealCardsHtml(event.real);
 
     if (success) {
-      const real = (event.real || []).map((n) => escapeHtml(n)).join("・") || "？";
       let reward = "";
       if (event.rewardKind === "instant") {
         reward = `<p class="fx-taste-reward">${event.rewardDraw ?? 0}枚ドロー！</p>`;
@@ -131,7 +144,7 @@ export class FxLayer {
           <p class="fx-taste-badge ok">味見成功</p>
           <p class="fx-taste-who"><strong>${taster}</strong> が味見した</p>
           <p class="fx-taste-detail">${actor} の宣言は嘘だった</p>
-          <p class="fx-taste-real">本当の札：${real}</p>
+          ${realCards}
           ${reward}
         </div>`;
     } else {
@@ -141,6 +154,7 @@ export class FxLayer {
           <p class="fx-taste-badge ng">味見失敗</p>
           <p class="fx-taste-who"><strong>${taster}</strong> が味見した</p>
           <p class="fx-taste-detail">${actor} の宣言は本当だった</p>
+          ${realCards}
           <p class="fx-taste-penalty">結果：${penalty}</p>
         </div>`;
     }

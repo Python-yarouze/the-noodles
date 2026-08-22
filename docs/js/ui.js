@@ -182,6 +182,7 @@ export class GameUI {
 
     // Patch cook reveal in place so CPU ack refreshes don't remount / flicker.
     if (this._patchCookReveal(view, { lock })) {
+      this._syncOverlays(view);
       if (view?.lastEvent) this.fx.play(view.lastEvent);
       return;
     }
@@ -339,6 +340,50 @@ export class GameUI {
     return true;
   }
 
+  /** Keep modal overlays in sync when the table is patched in place (cook_reveal acks). */
+  _syncOverlays(view) {
+    this.root.querySelectorAll(".modal-backdrop, .detail-backdrop").forEach((el) => el.remove());
+    const html = this._overlaysHtml(view);
+    if (!html.trim()) return;
+    const wrap = document.createElement("div");
+    wrap.innerHTML = html.trim();
+    while (wrap.firstChild) {
+      const node = wrap.firstChild;
+      this.root.appendChild(node);
+      this._bindOverlayNode(node);
+    }
+  }
+
+  _renderMiniCards(names, { faceDown = 0 } = {}) {
+    if (faceDown > 0) {
+      return Array.from({ length: faceDown }, () => `<span class="mini-card--back" aria-hidden="true"></span>`).join(
+        ""
+      );
+    }
+    return (names || [])
+      .map(
+        (n) =>
+          `<img src="${cardImagePath(n)}" alt="${escapeHtml(n)}" class="mini-card" title="${escapeHtml(n)}" />`
+      )
+      .join("");
+  }
+
+  _renderLogEntry(entry) {
+    const item = typeof entry === "string" ? { text: entry } : entry || {};
+    const cardsHtml = this._logEntryCardsHtml(item);
+    return `<li><span class="log-entry-text">${escapeHtml(item.text || "")}</span>${cardsHtml}</li>`;
+  }
+
+  _logEntryCardsHtml(entry) {
+    if (entry.faceDown) {
+      return `<div class="log-card-row">${this._renderMiniCards([], { faceDown: entry.faceDown })}</div>`;
+    }
+    if (entry.cards?.length) {
+      return `<div class="log-card-row">${this._renderMiniCards(entry.cards)}</div>`;
+    }
+    return "";
+  }
+
   _fieldMetaHtml(view, opts) {
     const { tasteOpen, tastePassed, passCount, passNeed, lock, myTurn, selectable, me } = opts;
     if (view.phase === "cook_reveal" && view.lastCook) {
@@ -383,6 +428,7 @@ export class GameUI {
     const cur = view.players[view.turn];
     const ev = view.lastEvent;
     let eventLine = "";
+    let eventCards = null;
     if (ev?.type === "draw" && ev.turnStart) {
       eventLine = `${escapeHtml(ev.playerName || cur?.name || "")} のばん`;
       if (ev.count > 0) eventLine += ` — ${ev.count}枚ドロー`;
@@ -399,6 +445,10 @@ export class GameUI {
       eventLine = `${escapeHtml(ev.playerName || "相手")} は料理しなかった`;
     } else if (ev?.type === "taste_all_passed" || ev?.type === "taste_timeout") {
       eventLine = ev.type === "taste_timeout" ? "時間切れ — 味見なしで続行" : "全員パス — 続行";
+    } else if (ev?.type === "taste_success" || ev?.type === "taste_fail") {
+      const label = ev.type === "taste_success" ? "味見成功" : "味見失敗";
+      eventLine = `${escapeHtml(ev.tasterName || "？")} の${label} — 本当の札`;
+      eventCards = ev.real || [];
     } else if (ev?.type === "end_hand") {
       eventLine = `${escapeHtml(ev.playerName || "")} が手札を整えた`;
     }
@@ -417,6 +467,11 @@ export class GameUI {
       <div class="field-status">
         <p class="field-status-phase">${escapeHtml(phase)}</p>
         ${eventLine ? `<p class="field-status-event">${eventLine}</p>` : ""}
+        ${
+          eventCards?.length
+            ? `<div class="mini-card-row field-status-cards">${this._renderMiniCards(eventCards)}</div>`
+            : ""
+        }
         <p class="field-status-msg">${msg}</p>
         ${
           limits.length
@@ -723,7 +778,7 @@ export class GameUI {
           </header>
           ${
             lines.length
-              ? `<ul class="log-modal-list">${lines.map((l) => `<li>${escapeHtml(l)}</li>`).join("")}</ul>`
+              ? `<ul class="log-modal-list">${lines.map((l) => this._renderLogEntry(l)).join("")}</ul>`
               : `<p class="hint log-modal-empty">まだログはありません</p>`
           }
         </div>
@@ -775,8 +830,7 @@ export class GameUI {
     const cooks = bestCooksFromHand(handNames, ruleSet);
     const tips = suggestImprovements(base.slice(0, 5), ruleSet, 8);
     const tops = topCombinations(ruleSet, 8);
-    const renderCardImages = (names) =>
-      names.map((n) => `<img src="${cardImagePath(n)}" alt="${escapeHtml(n)}" class="mini-card" />`).join("");
+    const renderCardImages = (names) => this._renderMiniCards(names);
 
     if (tab === "tips") {
       return `

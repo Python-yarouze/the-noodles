@@ -81,8 +81,9 @@ export class NoodlesGame {
     if (this.onChange) this.onChange(this.state);
   }
 
-  _log(msg) {
-    this.state.log = [...this.state.log.slice(-40), msg];
+  _log(entry) {
+    const item = typeof entry === "string" ? { text: entry } : entry;
+    this.state.log = [...this.state.log.slice(-40), item];
   }
 
   _clearCookRevealTimer() {
@@ -399,7 +400,10 @@ export class NoodlesGame {
     this.state.discardDeclareCount = (this.state.discardDeclareCount || 0) + 1;
     this.state.phase = "taste_window";
     this._armTasteWindow();
-    this._log(`${p.name} が「${declaration}」を宣言して1枚伏せました`);
+    this._log({
+      text: `${p.name} が「${declaration}」を宣言して1枚伏せました`,
+      cards: [declaration],
+    });
     this._emit({
       type: "discard_declare",
       kind: "single",
@@ -437,7 +441,10 @@ export class NoodlesGame {
     this.state.discardDeclareCount = (this.state.discardDeclareCount || 0) + 1;
     this.state.phase = "taste_window";
     this._armTasteWindow();
-    this._log(`${p.name} がペア（2枚）を宣言して伏せました`);
+    this._log({
+      text: `${p.name} がペア（2枚）を宣言して伏せました`,
+      faceDown: 2,
+    });
     this._emit({
       type: "discard_declare",
       kind: "pair",
@@ -493,16 +500,24 @@ export class NoodlesGame {
 
     if (pending.isTruthful) {
       const hadCards = taster.hand.length > 0;
+      const realNames = pending.cards.map((c) => c.name);
+      const realLabel = realNames.join("・");
       let penaltyNote = "";
       if (!hadCards) {
         taster.score -= 5;
         penaltyNote = "−5点";
-        this._log(`${taster.name} の味見失敗！ 手札なしのため −5点`);
+        this._log({
+          text: `${taster.name} の味見失敗！ 手札なしのため −5点（本当は ${realLabel}）`,
+          cards: realNames,
+        });
       } else {
         this.state.discardPile.push(...taster.hand);
         taster.hand = [];
         penaltyNote = "手札没収";
-        this._log(`${taster.name} の味見失敗！ 手札をすべて捨てました`);
+        this._log({
+          text: `${taster.name} の味見失敗！ 手札をすべて捨てました（本当は ${realLabel}）`,
+          cards: realNames,
+        });
       }
       this._completePendingDraw(actor, pending);
       const won = this._checkWin();
@@ -515,26 +530,31 @@ export class NoodlesGame {
           actorName: actor.name,
           actorIndex: pending.actorIndex,
           penaltyNote,
+          real: realNames,
         });
       }
     } else {
       this.state.discardPile.push(...pending.cards);
       const drawCount = pending.drawCount;
+      const realNames = pending.cards.map((c) => c.name);
+      const realLabel = realNames.join("・");
       let rewardDraw = 0;
       let rewardKind = "bonus";
       if (this.state.ruleSet === "noodles") {
         rewardDraw = this._drawTo(taster, drawCount);
         rewardKind = "instant";
-        this._log(
-          `${taster.name} の味見成功！（本当は ${pending.cards.map((c) => c.name).join("・")}）→ ${rewardDraw}枚獲得`
-        );
+        this._log({
+          text: `${taster.name} の味見成功！（本当は ${realLabel}）→ ${rewardDraw}枚獲得`,
+          cards: realNames,
+        });
       } else {
         taster.nextTurnBonusDraw += 1;
         rewardDraw = 1;
         rewardKind = "next_turn";
-        this._log(
-          `${taster.name} の味見成功！（本当は ${pending.cards.map((c) => c.name).join("・")}）→ 次ターン+1ドロー`
-        );
+        this._log({
+          text: `${taster.name} の味見成功！（本当は ${realLabel}）→ 次ターン+1ドロー`,
+          cards: realNames,
+        });
       }
       this.state.pendingAction = null;
       this.state.tasteDeadline = null;
@@ -667,7 +687,10 @@ export class NoodlesGame {
     this.state.discardPile.push(...cards);
     p.score += v.points;
     this.state.cookedThisTurn = true;
-    this._log(`${p.name} が料理！ +${v.points}点（合計 ${p.score}）← ${names.join("・")}`);
+    this._log({
+      text: `${p.name} が料理！ +${v.points}点（合計 ${p.score}）`,
+      cards: names,
+    });
 
     if (!this.state.drawFailed) {
       const got = this._drawTo(p, 1);
