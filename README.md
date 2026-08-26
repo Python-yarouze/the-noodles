@@ -170,21 +170,29 @@
 | **しょうゆ** ＋ **ねぎ** | しょうゆが 2 点 |
 | **しょうゆ** ＋ **しょうが** | しょうゆが 3 点 |
 
-### 特殊な点数変動（特に注意）
+### カードごとの点数
 
-| カード | 特殊ルール |
-|--------|------------|
-| <img src="docs/assets/cards/rice.png" width="40" alt="ごはん" /> **ごはん** | ちょうど **4 枚**で「ごはん＋タンパク質＋調味料＋トッピング」なら、ごはんが **8 点** |
-| <img src="docs/assets/cards/sprouts.png" width="40" alt="もやし" /> **もやし** | 基本 0。**たまご**とで 4 点、**ぶた**または**とり**とで **7 点** |
-| <img src="docs/assets/cards/menma.png" width="40" alt="めんま" /> **めんま** | 基本 2。トッピングがめんま**だけ**なら **4 点** |
-| <img src="docs/assets/cards/miso.png" width="40" alt="みそ" /> **みそ** | **コーン**で 4 点、コーン＋**バター**で **9 点** |
-| <img src="docs/assets/cards/salt.png" width="40" alt="しお" /> **しお** | 基本 0。「調味料」と一緒で **−2 点**。5 枚で料理する時に「タンパク質」を使っていないと **10 点**（他の「調味料」があると **8 点**） |
-| <img src="docs/assets/cards/garlic.png" width="40" alt="にんにく" /> **にんにく** | 基本 −2 のうえ、料理の**合計点を 2 倍** |
-| <img src="docs/assets/cards/butter.png" width="40" alt="バター" /> **バター** | **きのこ**で 3、きのこ＋**しょうゆ**で 5 |
-| <img src="docs/assets/cards/green-onion.png" width="40" alt="ねぎ" /> **ねぎ** | **えび**と一緒ならねぎが 4 点 |
-| <img src="docs/assets/cards/ginger.png" width="40" alt="しょうが" /> **しょうが** | **ぶた**と一緒ならしょうがが 4 点 |
-| <img src="docs/assets/cards/corn.png" width="40" alt="コーン" /> **コーン** | **とり**とで 3 点 |
-| <img src="docs/assets/cards/mushroom.png" width="40" alt="きのこ" /> **きのこ** | **とり**とで 3 点 |
+各カードの基本点と、一緒に出した食材による点数変化です（ゲーム内の「効果表」と同じ内容）。
+
+| カード | 点数 |
+|--------|------|
+| <img src="docs/assets/cards/noodle.png" width="40" alt="めん" /> **めん** | 基本 1 点。必須食材。 |
+| <img src="docs/assets/cards/rice.png" width="40" alt="ごはん" /> **ごはん** | 基本 1 点。必須食材。ちょうど 4 枚で「ごはん＋タンパク質＋調味料＋トッピング」なら 8 点。 |
+| <img src="docs/assets/cards/chicken.png" width="40" alt="とり" /> **とり** | 基本 3 点。ねぎで 5 点、ねぎ＋しょうがで 7 点。 |
+| <img src="docs/assets/cards/pork.png" width="40" alt="ぶた" /> **ぶた** | 基本 5 点。きのこで 8 点。 |
+| <img src="docs/assets/cards/shrimp.png" width="40" alt="えび" /> **えび** | 基本 6 点。しょうがで 9 点、しょうが＋しょうゆで 11 点。 |
+| <img src="docs/assets/cards/egg.png" width="40" alt="たまご" /> **たまご** | 基本 3 点。調味料と一緒なら 5 点。 |
+| <img src="docs/assets/cards/butter.png" width="40" alt="バター" /> **バター** | 基本 1 点。きのこで 3 点、きのこ＋しょうゆで 5 点。 |
+| <img src="docs/assets/cards/soy.png" width="40" alt="しょうゆ" /> **しょうゆ** | 基本 1 点。ねぎで 2 点、しょうがで 3 点。 |
+| <img src="docs/assets/cards/miso.png" width="40" alt="みそ" /> **みそ** | 基本 1 点。コーンで 4 点、コーン＋バターで 9 点。 |
+| <img src="docs/assets/cards/salt.png" width="40" alt="しお" /> **しお** | 基本 0 点。「調味料」と一緒で −2 点。5 枚で料理する時に「タンパク質」を使っていないと 10 点（他の「調味料」があると 8 点）。 |
+| <img src="docs/assets/cards/green-onion.png" width="40" alt="ねぎ" /> **ねぎ** | 基本 3 点。えびで 4 点。 |
+| <img src="docs/assets/cards/ginger.png" width="40" alt="しょうが" /> **しょうが** | 基本 2 点。ぶたで 4 点。 |
+| <img src="docs/assets/cards/mushroom.png" width="40" alt="きのこ" /> **きのこ** | 基本 2 点。とりで 3 点。 |
+| <img src="docs/assets/cards/menma.png" width="40" alt="めんま" /> **めんま** | 基本 2 点。トッピングがめんまだけのとき 4 点。 |
+| <img src="docs/assets/cards/corn.png" width="40" alt="コーン" /> **コーン** | 基本 1 点。とりで 3 点。 |
+| <img src="docs/assets/cards/sprouts.png" width="40" alt="もやし" /> **もやし** | 基本 0 点。たまごで 4 点、ぶたまたはとりで 7 点。 |
+| <img src="docs/assets/cards/garlic.png" width="40" alt="にんにく" /> **にんにく** | 基本 −2 点。料理の合計点を 2 倍にする（この −2 も先に加算してから倍）。 |
 
 ゲーム内の「効果表」でも、カードごとの料理効果・伏せ引き効果を確認できます。
 
