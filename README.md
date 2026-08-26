@@ -178,7 +178,7 @@
 | <img src="docs/assets/cards/sprouts.png" width="40" alt="もやし" /> **もやし** | 基本 0。**たまご**とで 4 点、**ぶた**または**とり**とで **7 点** |
 | <img src="docs/assets/cards/menma.png" width="40" alt="めんま" /> **めんま** | 基本 2。トッピングがめんま**だけ**なら **4 点** |
 | <img src="docs/assets/cards/miso.png" width="40" alt="みそ" /> **みそ** | **コーン**で 4 点、コーン＋**バター**で **9 点** |
-| <img src="docs/assets/cards/salt.png" width="40" alt="しお" /> **しお** | 基本 0。他の調味料（しょうゆ・みそ）があると **−2**。タンパク質なしの **5 枚**料理なら **12 点** |
+| <img src="docs/assets/cards/salt.png" width="40" alt="しお" /> **しお** | 基本 0。「調味料」と一緒で **−2 点**。5 枚で料理する時に「タンパク質」を使っていないと **10 点**（他の「調味料」があると **8 点**） |
 | <img src="docs/assets/cards/garlic.png" width="40" alt="にんにく" /> **にんにく** | 基本 −2 のうえ、料理の**合計点を 2 倍** |
 | <img src="docs/assets/cards/butter.png" width="40" alt="バター" /> **バター** | **きのこ**で 3、きのこ＋**しょうゆ**で 5 |
 | <img src="docs/assets/cards/green-onion.png" width="40" alt="ねぎ" /> **ねぎ** | **えび**と一緒ならねぎが 4 点 |

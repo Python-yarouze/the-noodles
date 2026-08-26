@@ -114,9 +114,10 @@ class CalcCardPoint:
         return 2
 
     def salt(self):
+        has_other_seasoning = any(i in self.cards for i in SEASONING if i != "しお")
         if len(self.cards) == 5 and not any(i in self.cards for i in PROTEIN):
-            return 12
-        if any(i in self.cards for i in SEASONING):
+            return 8 if has_other_seasoning else 10
+        if has_other_seasoning:
             return -2
         return 0
 

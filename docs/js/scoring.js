@@ -101,9 +101,11 @@ const scorers = {
     return 2;
   },
   しお(cards) {
-    if (cards.length === 5 && !anyOf(cards, PROTEIN)) return 12;
-    // −2 only when another seasoning is present (not しお alone)
-    if (SEASONING.some((n) => n !== "しお" && cards.includes(n))) return -2;
+    const hasOtherSeasoning = SEASONING.some((n) => n !== "しお" && cards.includes(n));
+    if (cards.length === 5 && !anyOf(cards, PROTEIN)) {
+      return hasOtherSeasoning ? 8 : 10;
+    }
+    if (hasOtherSeasoning) return -2;
     return 0;
   },
   コーン(cards) {
