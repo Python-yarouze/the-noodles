@@ -1,5 +1,7 @@
 /** Card categories and deck composition (ラーメン効果表). */
 
+import { isCurrySkin } from "./skin.js";
+
 export const ESSENTIAL = ["ごはん", "めん"];
 export const PROTEIN = ["えび", "ぶた", "とり", "たまご", "バター"];
 export const SEASONING = ["しょうゆ", "みそ", "しお"];
@@ -144,7 +146,7 @@ export const EFFECT_CHART_IMAGE = "assets/cards/effect-chart.png";
 
 export function cardImagePath(name) {
   const file = CARD_IMAGE_FILES[name] || "noodle";
-  return `assets/cards/${file}.png`;
+  return isCurrySkin() ? `assets/cards/curry/${file}.png` : `assets/cards/${file}.png`;
 }
 
 export function isEssential(name) {

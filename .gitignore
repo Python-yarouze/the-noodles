@@ -5,6 +5,10 @@ docs/js/ice-config.js
 dist/
 scripts/
 
+# Working notes / source art at repo root (shipped assets are under docs/assets/)
+/*.png
+the_curry.txt
+
 # Python
 __pycache__/
 *.py[cod]

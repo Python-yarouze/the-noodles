@@ -9,6 +9,16 @@ import { decideCpuAction } from "./ai.js";
 import { showAppToast } from "./fx.js";
 import { MAX_PLAYERS, clampWinScore, clampTasteMs, RULE_LABELS, cardImagePath } from "./deck.js";
 import { effectsByCategory } from "./card-effects.js";
+import {
+  installKonamiListener,
+  onSkinChange,
+  applyBodySkinClass,
+  brandName,
+  displayCardName,
+  applySkinToText,
+  isCurrySkin,
+  SKIN_CURRY,
+} from "./skin.js";
 
 const lobbyEl = document.getElementById("lobby");
 const tableEl = document.getElementById("table");
@@ -909,7 +919,7 @@ function hostSettingsSummary() {
   const seats = lobbySeatCount();
   const tasteLabel = tasteWindowMs ? `${Math.round(tasteWindowMs / 1000)}秒` : "制限なし";
   return [
-    ["ルールセット", RULE_LABELS[rule] || rule],
+    ["ルールセット", rule === "classic" ? (RULE_LABELS.classic || rule) : brandName()],
     ["目標ポイント", `${winScore}点`],
     ["味見の制限時間", tasteLabel],
     ["オンライン人数", `${seats}人（不足分はCPU）`],
@@ -1013,11 +1023,11 @@ function renderLobbyEffects() {
             <img src="${cardImagePath(c.name)}" alt="" />
             <div class="ref-row-body">
               <div class="ref-row-head">
-                <strong>${escapeHtml(c.name)}</strong>
-                <span class="ref-stats">${escapeHtml(c.base)} ／ ${escapeHtml(c.countLabel)}</span>
+                <strong>${escapeHtml(displayCardName(c.name))}</strong>
+                <span class="ref-stats">${escapeHtml(applySkinToText(c.base))} ／ ${escapeHtml(c.countLabel)}</span>
               </div>
-              <p class="ref-effect">${escapeHtml(c.effect)}</p>
-              ${c.discard ? `<p class="ref-discard">${escapeHtml(c.discard)}</p>` : ""}
+              <p class="ref-effect">${escapeHtml(applySkinToText(c.effect))}</p>
+              ${c.discard ? `<p class="ref-discard">${escapeHtml(applySkinToText(c.discard))}</p>` : ""}
             </div>
           </div>`
           )
@@ -1223,7 +1233,7 @@ function syncLobbySummary() {
   const ruleVal = document.querySelector(".lobby-details .details-summary-val");
   const settingsVal = document.querySelectorAll(".lobby-details .details-summary-val")[1];
   const rule = selectedRuleSet();
-  if (ruleVal) ruleVal.textContent = rule === "classic" ? "本家ルール" : "THE NOODLES";
+  if (ruleVal) ruleVal.textContent = rule === "classic" ? "本家ルール" : brandName();
   const win = document.getElementById("win-score")?.value || 50;
   const taste = Number(document.getElementById("taste-sec")?.value ?? 15);
   const seats = lobbySeatCount();
@@ -1240,6 +1250,54 @@ syncLobbyDetailsMode();
 window.matchMedia("(max-width: 640px)").addEventListener("change", syncLobbyDetailsMode);
 document.addEventListener("visibilitychange", () => {
   onHostVisibility();
+});
+
+function applyLobbySkin() {
+  applyBodySkinClass();
+  const brand = brandName();
+  document.title = brand;
+
+  const logo = document.querySelector(".title-logo");
+  if (logo) {
+    logo.src = isCurrySkin() ? "assets/title-curry.png" : "assets/title.png";
+    logo.alt = brand;
+  }
+
+  const sub = document.querySelector(".hero-sub");
+  if (sub) {
+    sub.innerHTML = isCurrySkin()
+      ? `カードでカレーを組み立て、<br class="hero-sub-br" />先に目標点を目指す対戦ゲーム`
+      : `カードでラーメンを組み立て、<br class="hero-sub-br" />先に目標点を目指す対戦ゲーム`;
+  }
+
+  document.querySelectorAll(".lobby-fan-card").forEach((img) => {
+    const src = img.getAttribute("src") || "";
+    const file = src.split("/").pop();
+    if (!file) return;
+    img.src = isCurrySkin() ? `assets/cards/curry/${file}` : `assets/cards/${file}`;
+  });
+
+  const brandRule = document.querySelector("[data-brand-rule-label]");
+  if (brandRule) {
+    brandRule.textContent = isCurrySkin()
+      ? "THE CURRY（★あり/オリジナルルール）"
+      : "THE NOODLES（★あり/オリジナルルール）";
+  }
+
+  const rulesImg = document.querySelector("#lobby-rules-modal img");
+  if (rulesImg) rulesImg.alt = `${brand} ルール`;
+
+  syncLobbySummary();
+  if (lobbyEffectsModal && !lobbyEffectsModal.hidden) renderLobbyEffects();
+  if (ui && ui.lastView) ui.render(ui.lastView, ui._lastMeta || {});
+}
+
+applyLobbySkin();
+installKonamiListener((skin) => {
+  showAppToast(skin === SKIN_CURRY ? "THE CURRY!" : "THE NOODLES", "fx-toast-go");
+});
+onSkinChange(() => {
+  applyLobbySkin();
 });
 
 showLobby();

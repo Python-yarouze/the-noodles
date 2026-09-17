@@ -7,6 +7,12 @@ import { explainScore, validateCookSet } from "./scoring.js";
 import { getCardEffect, effectsByCategory } from "./card-effects.js";
 import { FxLayer, showAppToast } from "./fx.js";
 import { suggestImprovements, topCombinations, bestCooksFromHand } from "./helper.js";
+import { displayCardName, applySkinToText, brandName, isCurrySkin } from "./skin.js";
+
+function displayRuleLabel(ruleSet) {
+  if (ruleSet === "noodles" && isCurrySkin()) return brandName();
+  return RULE_LABELS[ruleSet] || ruleSet || "";
+}
 
 const SEAT_COLORS = ["#c44b2f", "#2a7a6a", "#c9a227", "#5c6bc0"];
 const RULES_IMG = RULES_IMAGE;
@@ -112,7 +118,7 @@ export class GameUI {
               )
               .join("")}
           </div>
-          <p class="mode-badge">${escapeHtml(RULE_LABELS[view?.ruleSet] || "")}</p>
+          <p class="mode-badge">${escapeHtml(displayRuleLabel(view?.ruleSet))}</p>
           <p class="hint">目標 ${goal}点 ／ ${tasteLabel}</p>
           <p class="hint">人数 ${have}/${target}（不足分は開始時にCPU）</p>
           <div class="wait-actions">
@@ -361,17 +367,17 @@ export class GameUI {
       );
     }
     return (names || [])
-      .map(
-        (n) =>
-          `<img src="${cardImagePath(n)}" alt="${escapeHtml(n)}" class="mini-card" title="${escapeHtml(n)}" />`
-      )
+      .map((n) => {
+        const label = displayCardName(n);
+        return `<img src="${cardImagePath(n)}" alt="${escapeHtml(label)}" class="mini-card" title="${escapeHtml(label)}" />`;
+      })
       .join("");
   }
 
   _renderLogEntry(entry) {
     const item = typeof entry === "string" ? { text: entry } : entry || {};
     const cardsHtml = this._logEntryCardsHtml(item);
-    return `<li><span class="log-entry-text">${escapeHtml(item.text || "")}</span>${cardsHtml}</li>`;
+    return `<li><span class="log-entry-text">${escapeHtml(applySkinToText(item.text || ""))}</span>${cardsHtml}</li>`;
   }
 
   _logEntryCardsHtml(entry) {
@@ -393,7 +399,7 @@ export class GameUI {
       return `
         <div class="pending pop">
           <span class="pending-decl">
-            伏せ札：<strong>${escapeHtml(view.pendingPublic.declaration)}</strong>
+            伏せ札：<strong>${escapeHtml(displayCardName(view.pendingPublic.declaration))}</strong>
             （${view.pendingPublic.cardCount}枚 → ${view.pendingPublic.drawCount}枚）
           </span>
           ${view.tasteDeadline ? `<span class="timer" data-deadline="${view.tasteDeadline}"></span>` : ""}
@@ -436,7 +442,7 @@ export class GameUI {
       eventLine =
         ev.kind === "pair"
           ? `${escapeHtml(ev.actorName || "")} がペアで伏せた`
-          : `${escapeHtml(ev.actorName || "")}「${escapeHtml(ev.declaration || "")}」と宣言`;
+          : `${escapeHtml(ev.actorName || "")}「${escapeHtml(displayCardName(ev.declaration || ""))}」と宣言`;
     } else if (ev?.type === "phase_cook") {
       eventLine = `${escapeHtml(ev.playerName || "")} の料理フェーズ`;
     } else if (ev?.type === "discard_resume") {
@@ -509,7 +515,7 @@ export class GameUI {
           ${(dish.names || [])
             .map(
               (n, i, arr) =>
-                `<button type="button" class="cook-reveal-card" style="--i:${i};--n:${arr.length}" aria-label="${escapeHtml(n)}"><img src="${cardImagePath(n)}" alt="${escapeHtml(n)}" /></button>`
+                `<button type="button" class="cook-reveal-card" style="--i:${i};--n:${arr.length}" aria-label="${escapeHtml(displayCardName(n))}"><img src="${cardImagePath(n)}" alt="${escapeHtml(displayCardName(n))}" /></button>`
             )
             .join("")}
         </div>
@@ -628,8 +634,8 @@ export class GameUI {
       role === "solo" && !myTurn && view.phase !== "taste_window" && view.phase !== "cook_reveal"
         ? `<span class="hot-tag">CPU…</span>`
         : "";
-    const mode = RULE_LABELS[view.ruleSet]
-      ? `<span class="mode-badge mode-badge--inline">${escapeHtml(RULE_LABELS[view.ruleSet])}</span>`
+    const mode = displayRuleLabel(view.ruleSet)
+      ? `<span class="mode-badge mode-badge--inline">${escapeHtml(displayRuleLabel(view.ruleSet))}</span>`
       : "";
     const roomChip = roomId ? `<span class="room-chip room-chip--inline">${escapeHtml(roomId)}</span>` : "";
     return `
@@ -650,11 +656,12 @@ export class GameUI {
 
   _handCardHtml(c) {
     const selected = this.selected.has(c.id) ? "selected" : "";
+    const label = displayCardName(c.name);
     return `
       <div class="card-wrap ${selected}">
         <button type="button" class="card ${selected}" data-card="${c.id}" data-name="${escapeHtml(c.name)}">
-          <img src="${cardImagePath(c.name)}" alt="${escapeHtml(c.name)}" />
-          <span class="card-name">${escapeHtml(c.name)}</span>
+          <img src="${cardImagePath(c.name)}" alt="${escapeHtml(label)}" />
+          <span class="card-name">${escapeHtml(label)}</span>
         </button>
         <button type="button" class="card-info" data-info="${escapeHtml(c.name)}" title="こうか">?</button>
       </div>`;
@@ -676,7 +683,7 @@ export class GameUI {
       .map((l) => {
         const cls =
           l.points > l.base ? "cook-line-boost" : l.points < l.base ? "cook-line-cut" : "";
-        return `<li class="${cls}"><span>${escapeHtml(l.name)}</span><strong>${l.points}</strong></li>`;
+        return `<li class="${cls}"><span>${escapeHtml(displayCardName(l.name))}</span><strong>${l.points}</strong></li>`;
       })
       .join("");
     return `
@@ -723,10 +730,10 @@ export class GameUI {
               </div>
               <div class="mini-card-row">
                 ${(h.names || [])
-                  .map(
-                    (n) =>
-                      `<img src="${cardImagePath(n)}" alt="${escapeHtml(n)}" class="mini-card" title="${escapeHtml(n)}" />`
-                  )
+                  .map((n) => {
+                    const label = displayCardName(n);
+                    return `<img src="${cardImagePath(n)}" alt="${escapeHtml(label)}" class="mini-card" title="${escapeHtml(label)}" />`;
+                  })
                   .join("")}
               </div>
             </li>`;
@@ -842,7 +849,7 @@ export class GameUI {
               ? `<ul class="helper-list">${tips.suggestions
                   .map(
                     (s) =>
-                      `<li><span class="tag">${escapeHtml(s.type)}</span> ${escapeHtml(s.action)} → <strong>${s.points}点</strong> <em>(+${s.diff})</em><br><div class="mini-card-row">${renderCardImages(s.resultHand)}</div></li>`
+                      `<li><span class="tag">${escapeHtml(s.type)}</span> ${escapeHtml(applySkinToText(s.action))} → <strong>${s.points}点</strong> <em>(+${s.diff})</em><br><div class="mini-card-row">${renderCardImages(s.resultHand)}</div></li>`
                   )
                   .join("")}</ul>`
               : `<p class="hint">これ以上の改善案は見つかりませんでした</p>`
@@ -879,21 +886,26 @@ export class GameUI {
 
   _detailModalHtml(name, ruleSet = "noodles") {
     const fx = getCardEffect(name, ruleSet);
+    const label = displayCardName(name);
     return `
       <div class="modal-backdrop detail-backdrop" data-act="close-detail">
         <div class="modal detail-modal" onclick="event.stopPropagation()">
           <button type="button" class="modal-close" data-act="close-detail">×</button>
           <div class="detail-layout">
-            <img class="detail-art" src="${cardImagePath(name)}" alt="${escapeHtml(name)}" />
+            <img class="detail-art" src="${cardImagePath(name)}" alt="${escapeHtml(label)}" />
             <div class="detail-body">
               <p class="detail-cat">${escapeHtml(fx?.category || categoryOf(name))}</p>
-              <h2 class="detail-title">${escapeHtml(name)}</h2>
+              <h2 class="detail-title">${escapeHtml(label)}</h2>
               <p class="detail-meta">
-                <span class="detail-base"><span>点数</span> ${escapeHtml(fx?.base || "—")}</span>
+                <span class="detail-base"><span>点数</span> ${escapeHtml(applySkinToText(fx?.base || "—"))}</span>
                 <span class="detail-count"><span>枚数</span> ${escapeHtml(fx?.countLabel || "—")}</span>
               </p>
-              <p class="detail-effect"><span>料理</span> ${escapeHtml(fx?.effect || "")}</p>
-              ${fx?.discard ? `<p class="detail-discard">${escapeHtml(fx.discard)}</p>` : ""}
+              <p class="detail-effect"><span>料理</span> ${escapeHtml(applySkinToText(fx?.effect || ""))}</p>
+              ${
+                fx?.discard
+                  ? `<p class="detail-discard">${escapeHtml(applySkinToText(fx.discard))}</p>`
+                  : ""
+              }
             </div>
           </div>
         </div>
@@ -1039,11 +1051,11 @@ export class GameUI {
           <img src="${cardImagePath(c.name)}" alt="" />
           <div class="ref-row-body">
             <div class="ref-row-head">
-              <strong>${escapeHtml(c.name)}</strong>
-              <span class="ref-stats">${escapeHtml(c.base)} ／ ${escapeHtml(c.countLabel)}</span>
+              <strong>${escapeHtml(displayCardName(c.name))}</strong>
+              <span class="ref-stats">${escapeHtml(applySkinToText(c.base))} ／ ${escapeHtml(c.countLabel)}</span>
             </div>
-            <p class="ref-effect">${escapeHtml(c.effect)}</p>
-            ${c.discard ? `<p class="ref-discard">${escapeHtml(c.discard)}</p>` : ""}
+            <p class="ref-effect">${escapeHtml(applySkinToText(c.effect))}</p>
+            ${c.discard ? `<p class="ref-discard">${escapeHtml(applySkinToText(c.discard))}</p>` : ""}
           </div>
         </button>`
         )
@@ -1109,9 +1121,9 @@ export class GameUI {
       if (n === 1) {
         return wrap(`
             <div class="decl-btns">
-              <button type="button" class="btn danger" data-act="confirm-single" data-decl="とり" ${dis1}>とり×2</button>
-              <button type="button" class="btn danger" data-act="confirm-single" data-decl="ぶた" ${dis1}>ぶた×3</button>
-              <button type="button" class="btn danger" data-act="confirm-single" data-decl="えび" ${dis1}>えび×4</button>
+              <button type="button" class="btn danger" data-act="confirm-single" data-decl="とり" ${dis1}>${escapeHtml(displayCardName("とり"))}×2</button>
+              <button type="button" class="btn danger" data-act="confirm-single" data-decl="ぶた" ${dis1}>${escapeHtml(displayCardName("ぶた"))}×3</button>
+              <button type="button" class="btn danger" data-act="confirm-single" data-decl="えび" ${dis1}>${escapeHtml(displayCardName("えび"))}×4</button>
               <button type="button" class="btn ghost btn-clear-sel" data-act="clear-sel" title="選択をクリア">×</button>
             </div>`);
       }
@@ -1506,7 +1518,7 @@ async function shareRoomCode(roomId) {
     return;
   }
   try {
-    await navigator.share({ text: `THE NOODLES の部屋コード: ${text}` });
+    await navigator.share({ text: `${brandName()} の部屋コード: ${text}` });
     showAppToast("共有したらこの画面に戻ってね");
   } catch (err) {
     if (err?.name === "AbortError") return;

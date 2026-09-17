@@ -3,6 +3,7 @@
  */
 
 import { cardImagePath } from "./deck.js";
+import { displayCardName } from "./skin.js";
 
 const SEAT_COLORS = ["#c45c26", "#2a7a6a", "#b8860b", "#5c6bc0"];
 
@@ -114,10 +115,10 @@ export class FxLayer {
 
   _tasteRealCardsHtml(names) {
     const cards = (names || [])
-      .map(
-        (n) =>
-          `<img src="${cardImagePath(n)}" alt="${escapeHtml(n)}" class="fx-taste-card-img" title="${escapeHtml(n)}" />`
-      )
+      .map((n) => {
+        const label = displayCardName(n);
+        return `<img src="${cardImagePath(n)}" alt="${escapeHtml(label)}" class="fx-taste-card-img" title="${escapeHtml(label)}" />`;
+      })
       .join("");
     if (!cards) return "";
     return `<p class="fx-taste-real">本当の札：</p><div class="fx-taste-real-cards">${cards}</div>`;
